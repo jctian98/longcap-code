@@ -55,7 +55,7 @@ def model_fixture(path):
     return path
 
 
-def prepared_fixture(path, seconds=1, key="sample"):
+def prepared_fixture(path, seconds=1, key="sample", task="caption"):
     path.mkdir()
     audio = path / "input.wav"
     sf.write(audio, np.zeros((int(seconds * 16000), 2)), 16000)
@@ -63,7 +63,7 @@ def prepared_fixture(path, seconds=1, key="sample"):
     write_jsonl(manifest, [{"key": key, "audio_path": str(audio), "duration": seconds,
                            "events": [{"caption": "THIS REFERENCE MUST NEVER ENTER A PROMPT"}]}])
     run = path / "run"
-    prepare_inputs(manifest, run, workers=1)
+    prepare_inputs(manifest, run, workers=1, task=task)
     return run
 
 

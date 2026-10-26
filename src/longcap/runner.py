@@ -1,4 +1,4 @@
-"""Resumable single-recording and batch caption inference over HTTP."""
+"""Resumable single-recording and batch audio inference over HTTP."""
 from __future__ import annotations
 
 import hashlib
@@ -11,7 +11,7 @@ from espnet2.speechlm.vllm.vllm_client.client import CaptionerClient, build_driv
 from .identity import checkpoint_identity, require_matching_model
 from .processing.common import read_json, unique_rows, write_json
 from .processing.convert import convert_predictions
-from .processing.prepare import verify_prepared
+from .processing.prepare import SYSTEM_PROMPTS, verify_prepared
 from .transport import JournalEngine, UploadAudioBook
 
 
@@ -43,14 +43,19 @@ def _retry_summary(records, field):
     }
 
 
-def run_caption(
+def _run_inference(
     run: Path, model: Path, service: str, *, concurrency: int = 1,
     max_tokens: int = 8129, timeout: float = 1800, max_retried_chunks: int = 20,
-    future_start_guard: bool = False, tokenizer=None,
+    future_start_guard: bool = False, tokenizer=None, task: str = "caption",
 ) -> tuple[dict, int]:
     if concurrency < 1 or max_tokens < 1 or timeout <= 0 or max_retried_chunks < 0:
         raise ValueError("Invalid concurrency, token budget, timeout or retry limit")
+    if task not in SYSTEM_PROMPTS or (task == "diarization" and future_start_guard):
+        raise ValueError("Invalid task or caption-only conversion option")
     prepared = verify_prepared(run)
+    if prepared["identity"]["system_prompt"] != SYSTEM_PROMPTS[task]:
+        raise ValueError("Prepared task differs; use a fresh output directory")
+    caption = task == "caption"
     identity = checkpoint_identity(model)
     client = CaptionerClient(service, timeout=timeout)
     try:
@@ -67,7 +72,8 @@ def run_caption(
         "version": 1, "input_sha256": prepared["output_sha256"],
         "source_sha256": _source_identity(), "server": server_identity,
         "max_tokens": max_tokens, "max_retried_chunks": max_retried_chunks,
-        "retry_penalties": [1.0, 1.05, 1.10, 1.15],
+        "retry_penalties": [1.0, 1.05, 1.10, 1.15] if caption else [1.0],
+        "task": task,
         "future_start_guard": future_start_guard,
     }
     manifest = run / "raw/run_identity.json"
@@ -92,7 +98,7 @@ def run_caption(
         client = CaptionerClient(service, timeout=timeout)
         book = UploadAudioBook(client)
         driver = build_driver(client, tokenizer, audiobook=book, max_tokens=max_tokens,
-                              max_workers=1, loop_retry=True, caption_format_retry=True,
+                              max_workers=1, loop_retry=caption, caption_format_retry=caption,
                               max_retried_chunks=max_retried_chunks)
         http_engine = driver.engine
         driver.engine = JournalEngine(http_engine, directory / "attempts", driver.prompt.decode_text)
@@ -120,6 +126,7 @@ def run_caption(
     early_ids = [key for key, r in records.items() if r.get("early_stop")]
     truncated_ids = [key for key, r in records.items() if r.get("truncated_hops", 0)]
     stats = {
+        "task": task,
         "num_examples": len(examples), "num_written": len(records),
         "num_errors": len(error_ids), "error_ids": error_ids,
         "error_details": [{"key": key, "error": records[key]["error"]} for key in error_ids],
@@ -142,8 +149,35 @@ def run_caption(
         stats["prediction_export"] = "withheld: request errors or early-stopped prefixes"
         write_json(run / "raw/client.json", stats)
         return stats, 1 if error_ids else 2
-    conversion = convert_predictions(run, future_start_guard=future_start_guard)
+    if caption:
+        conversion = convert_predictions(run, future_start_guard=future_start_guard)
+    else:
+        from .processing.diarization import convert_diarization
+        conversion = convert_diarization(run)
     stats["conversion"] = conversion
     incomplete = bool(truncated_ids) or any(k in conversion["statuses"] for k in ("partial", "parse_error"))
     exhausted = stats["caption_retry_summary"]["num_exhausted"]
     return stats, 2 if incomplete or exhausted else 0
+
+
+def run_caption(
+    run: Path, model: Path, service: str, *, concurrency: int = 1,
+    max_tokens: int = 8129, timeout: float = 1800, max_retried_chunks: int = 20,
+    future_start_guard: bool = False, tokenizer=None,
+) -> tuple[dict, int]:
+    return _run_inference(
+        run, model, service, concurrency=concurrency, max_tokens=max_tokens,
+        timeout=timeout, max_retried_chunks=max_retried_chunks,
+        future_start_guard=future_start_guard, tokenizer=tokenizer,
+    )
+
+
+def run_diarization(
+    run: Path, model: Path, service: str, *, concurrency: int = 1,
+    max_tokens: int = 32768, timeout: float = 1800, tokenizer=None,
+) -> tuple[dict, int]:
+    """Use the native diarization prompt and decoding policy, without caption retries."""
+    return _run_inference(
+        run, model, service, concurrency=concurrency, max_tokens=max_tokens,
+        timeout=timeout, max_retried_chunks=0, tokenizer=tokenizer, task="diarization",
+    )

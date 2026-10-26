@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "longcap"
 version = "0.1.0"
-description = "LongCap 35B-A3B audio captioning client and custom vLLM service"
+description = "LongCap 35B-A3B audio captioning and speech diarization client with a custom vLLM service"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "docs/THIRD_PARTY_NOTICES.md"]

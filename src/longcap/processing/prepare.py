@@ -1,4 +1,4 @@
-"""Build audio-only, history-preserving captioner dialogues from a benchmark."""
+"""Build audio-only, history-preserving captioning or diarization dialogues."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from .common import file_sha256, read_json, unique_rows, write_json, write_jsonl
 
 SYSTEM_PROMPT = "Conduct audio caption"
+SYSTEM_PROMPTS = {"caption": SYSTEM_PROMPT, "diarization": "Conduct audio diarization"}
 CHUNK_LENGTHS = (8, 16, 24, 32)
 
 
@@ -108,7 +109,11 @@ def prepare_inputs(
     *,
     seed: int = 42,
     workers: int = 16,
+    task: str = "caption",
 ) -> dict:
+    if task not in SYSTEM_PROMPTS:
+        raise ValueError(f"Unknown inference task: {task}")
+    system_prompt = SYSTEM_PROMPTS[task]
     if workers < 1:
         raise ValueError("workers must be positive")
     manifest_path, run_directory = manifest_path.resolve(), run_directory.resolve()
@@ -117,7 +122,7 @@ def prepare_inputs(
         "manifest": str(manifest_path),
         "manifest_sha256": file_sha256(manifest_path),
         "seed": seed,
-        "system_prompt": SYSTEM_PROMPT,
+        "system_prompt": system_prompt,
         "chunk_lengths": list(CHUNK_LENGTHS),
         "audio_view": "manifest-duration-prefix/native-rate/mono/pcm16",
         "preparer_sha256": file_sha256(Path(__file__)),
@@ -178,7 +183,7 @@ def prepare_inputs(
 
     dialogues = []
     for row in examples:
-        messages = [["system", "text", SYSTEM_PROMPT]]
+        messages = [["system", "text", system_prompt]]
         for chunk in row["chunks"]:
             messages.extend(
                 [

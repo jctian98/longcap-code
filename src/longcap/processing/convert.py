@@ -116,7 +116,9 @@ def convert_predictions(run_directory: Path, *, future_start_guard: bool = False
         saved = read_json(previous)
         if saved.get("postprocessing_policy", saved.get("deduplication_policy")) != policy:
             raise ValueError("Postprocessing policy changed; use a fresh run copy without predictions")
-    verify_prepared(run_directory)
+    prepared = verify_prepared(run_directory)
+    if prepared["identity"]["system_prompt"] != "Conduct audio caption":
+        raise ValueError("Caption conversion requires caption inputs; use longcap convert for diarization")
     examples = unique_rows(run_directory / "inputs/chunks.jsonl")
     raw_directory = run_directory / "raw"
     statistics = read_json(raw_directory / "client.json")

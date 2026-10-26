@@ -28,6 +28,8 @@ COPY ${SOURCE_DIR}/ /opt/longcap/
 RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps . \
     && python -m pip check \
     && longcap --help \
+    && longcap caption --help \
+    && longcap diarize --help \
     && python docker/check_environment.py \
     && mkdir -p /cache /output
 EXPOSE 20000

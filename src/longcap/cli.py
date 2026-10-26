@@ -30,7 +30,7 @@ def serve_arguments(args) -> list[str]:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="LongCap 35B-A3B audio captioning")
+    parser = argparse.ArgumentParser(description="LongCap 35B-A3B audio captioning and speech diarization")
     commands = parser.add_subparsers(dest="command", required=True)
     serve = commands.add_parser("serve", help="Start the custom vLLM server")
     serve.add_argument("--model", type=Path, required=True)
@@ -44,21 +44,26 @@ def main(argv=None) -> int:
                        help="Enable shared-path registration for a trusted local deployment")
     verify = commands.add_parser("verify-model", help="Verify every published model checksum")
     verify.add_argument("--model", type=Path, required=True)
-    caption = commands.add_parser("caption", help="Caption local audio with the upload client")
-    source = caption.add_mutually_exclusive_group(required=True)
-    source.add_argument("--audio", type=Path)
-    source.add_argument("--manifest", type=Path)
-    caption.add_argument("--key", default="example")
-    caption.add_argument("--model", type=Path, required=True)
-    caption.add_argument("--service", default="http://127.0.0.1:20000")
-    caption.add_argument("--output", type=Path, required=True)
-    caption.add_argument("--concurrency", type=int, default=1)
-    caption.add_argument("--max-tokens", type=int, default=8129)
-    caption.add_argument("--http-timeout", type=float, default=1800)
-    caption.add_argument("--max-retried-chunks", type=int, default=20)
-    caption.add_argument("--prepare-only", action="store_true")
-    caption.add_argument("--future-start-guard", action="store_true",
-                         help="Opt into a newer timestamp filter; changes the paper's conversion policy")
+    for name, description, token_budget in (
+        ("caption", "Caption local audio with the upload client", 8129),
+        ("diarize", "Transcribe local audio with speaker labels and timestamps", 32768),
+    ):
+        command = commands.add_parser(name, help=description)
+        source = command.add_mutually_exclusive_group(required=True)
+        source.add_argument("--audio", type=Path)
+        source.add_argument("--manifest", type=Path)
+        command.add_argument("--key", default="example")
+        command.add_argument("--model", type=Path, required=True)
+        command.add_argument("--service", default="http://127.0.0.1:20000")
+        command.add_argument("--output", type=Path, required=True)
+        command.add_argument("--concurrency", type=int, default=1)
+        command.add_argument("--max-tokens", type=int, default=token_budget)
+        command.add_argument("--http-timeout", type=float, default=1800)
+        command.add_argument("--prepare-only", action="store_true")
+        if name == "caption":
+            command.add_argument("--max-retried-chunks", type=int, default=20)
+            command.add_argument("--future-start-guard", action="store_true",
+                                 help="Opt into a newer timestamp filter; changes the paper's conversion policy")
     convert = commands.add_parser("convert", help="Convert a complete saved raw run")
     convert.add_argument("--run", type=Path, required=True)
     convert.add_argument("--future-start-guard", action="store_true")
@@ -75,14 +80,22 @@ def main(argv=None) -> int:
         from .processing.common import file_sha256, run_lock, write_jsonl
         if args.command == "convert":
             from .processing.convert import convert_predictions
+            from .processing.common import read_json
             with run_lock(args.run):
-                report = convert_predictions(args.run, future_start_guard=args.future_start_guard)
+                prepared = read_json(args.run / "inputs/preparation.json")
+                if prepared["identity"]["system_prompt"] == "Conduct audio diarization":
+                    if args.future_start_guard:
+                        raise ValueError("--future-start-guard applies only to captioning")
+                    from .processing.diarization import convert_diarization
+                    report = convert_diarization(args.run)
+                else:
+                    report = convert_predictions(args.run, future_start_guard=args.future_start_guard)
                 print(json.dumps(report, indent=2))
             incomplete = report["num_truncated"] or any(k in report["statuses"] for k in ("partial", "parse_error"))
             exhausted = (report.get("caption_retry_summary") or {}).get("num_exhausted", 0)
             return 2 if incomplete or exhausted else 0
         from .processing.prepare import prepare_inputs
-        from .runner import run_caption
+        from .runner import run_caption, run_diarization
         run = args.output.resolve()
         with run_lock(run):
             manifest = args.manifest
@@ -97,14 +110,21 @@ def main(argv=None) -> int:
                 if manifest.exists() and json.loads(manifest.read_text()) != row:
                     raise ValueError("Source audio changed; use a fresh output directory")
                 write_jsonl(manifest, [row])
-            report = prepare_inputs(manifest, run, workers=1)
+            task = "diarization" if args.command == "diarize" else "caption"
+            report = prepare_inputs(manifest, run, workers=1, task=task)
             if args.prepare_only:
                 print(json.dumps(report, indent=2))
                 return 0
-            report, code = run_caption(run, args.model, args.service,
-                                       concurrency=args.concurrency, max_tokens=args.max_tokens,
-                                       timeout=args.http_timeout, max_retried_chunks=args.max_retried_chunks,
-                                       future_start_guard=args.future_start_guard)
+            options = {"concurrency": args.concurrency, "max_tokens": args.max_tokens,
+                       "timeout": args.http_timeout}
+            if task == "diarization":
+                report, code = run_diarization(run, args.model, args.service, **options)
+            else:
+                report, code = run_caption(
+                    run, args.model, args.service, **options,
+                    max_retried_chunks=args.max_retried_chunks,
+                    future_start_guard=args.future_start_guard,
+                )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return code
     except (ValueError, RuntimeError, OSError) as error:

@@ -1,68 +1,101 @@
-# LongCap
+# LongCap: Hour-Scale Timestamped Audio Captioning via Chunk-wise Processing
 
-LongCap produces timestamped audio captions for recordings from seconds to hours. This repository contains the Python client, custom vLLM model implementation, inference server, and Docker recipe for **LongCap-35B-A3B V4, stage-2 step 3000**: the checkpoint used for the paper's main captioning experiments before flywheel training. Native event-ancestor prediction is not supported by this checkpoint.
+**Jinchuan Tian, Sen Chen, Wenbin Huang, Chao Weng, Zhengwei Huang, Jiatong Shi, Yichen Lu, Haoran Wang, Shinji Watanabe, and Cong Zhou**
 
-The [model](https://huggingface.co/JinchuanTian/LongCap-35B-A3B), [benchmark](https://huggingface.co/datasets/JinchuanTian/LongCap-Long), [project page](https://jctian98.github.io/longcap/), and paper are distributed separately. The benchmark and demo include original media URLs and our labels; they do not distribute audio or video. Model/data repositories require authorized access during private staging.
+[Project page](https://jctian98.github.io/longcap/) · [Paper and release assets](https://github.com/jctian98/longcap-code/releases) · [Model](https://huggingface.co/JinchuanTian/LongCap-35B-A3B) · [Long benchmark](https://huggingface.co/datasets/JinchuanTian/LongCap-Long)
 
-## Quick start
+Official inference code for **LongCap**, a framework for describing audio events with timestamps across recordings from seconds to hours. LongCap interleaves audio chunks and structured text, retaining earlier context while expressing event times relative to each chunk.
 
-Use Python 3.12 on Linux. Install the CPU client in a virtual environment from this repository:
+The released **LongCap-35B-A3B** checkpoint supports two tasks with the same model and vLLM server:
 
-```bash
-git clone https://github.com/jctian98/longcap-code.git
-cd longcap-code
-python3.12 -m venv .venv
-. .venv/bin/activate
-python -m pip install --require-hashes -r requirements/client.lock
-python -m pip install --no-deps .
-hf auth login
-hf download JinchuanTian/LongCap-35B-A3B --local-dir /absolute/path/to/LongCap-35B-A3B
-longcap verify-model --model /absolute/path/to/LongCap-35B-A3B
-```
+| Task | Output | Command |
+| --- | --- | --- |
+| Timestamped audio captioning | Speech, music, and environmental events with timestamps and descriptive attributes | `longcap caption` |
+| Speech recognition and diarization | Transcripts with speaker labels and timestamps | `longcap diarize` |
 
-The complete model directory, including `SHA256SUMS`, is required. Its 21 weight shards occupy approximately 38.43 GB. The client does not require PyTorch or a GPU. A client and server may mount the same verified model files at different paths.
+This repository includes a CPU client, the custom vLLM model and server, resumable inference, and Docker support. The checkpoint is the paper's 35B-A3B V4 model at stage-2 step 3000, before flywheel training. Native event-ancestor prediction is not supported.
 
-Use `--revision` with the model commit recorded in the release manifest for reproducible downloads. Authentication is required while the repository is private.
+## Results
 
-Build and run the GPU server from the repository root:
-
-```bash
-docker build -f docker/Dockerfile -t longcap:0.1.0 .
-docker run --rm --gpus '"device=0"' --shm-size=16g \
-  -p 127.0.0.1:20000:20000 \
-  -v /absolute/path/to/LongCap-35B-A3B:/models/longcap-35b-a3b:ro \
-  -v /absolute/path/to/cache:/cache \
-  longcap:0.1.0
-```
-
-The Docker recipe starts from an official PyTorch image pinned by digest, installs hash-locked dependencies in an isolated environment, and loads weights from the external model mount. The initial hardware target is one H100 80GB, CUDA 13.0, and tensor parallel size 1. Wait for `http://127.0.0.1:20000/health` to return success before captioning.
-
-```bash
-longcap caption --audio /absolute/path/to/example.wav --key example \
-  --model /absolute/path/to/LongCap-35B-A3B \
-  --service http://127.0.0.1:20000 --output ./outputs/example
-```
-
-Read timestamped events in `outputs/example/predictions/predictions.jsonl` and processing status in `outputs/example/raw/client.json`. Run the identical command again to resume from its durable request journal. A new input, model, server implementation, or decoding configuration requires a fresh output directory. Exit status 2 means partial/truncated output or exhausted retries; inspect the saved status before using predictions.
-
-See [inference and output details](docs/inference.md) for batch manifests, chunking, profiles, retry behavior, and conversion. See [Docker setup](docs/DOCKER.md) for host requirements, model verification, client containers, and dependency-lock maintenance.
-
-## Paper results and validation
-
-Historical V4 results use `speech_caption_insensitive_overlap_v2` conversion. The release converter exactly reproduces all 1,549 saved prediction records: 1,500 short clips, four full recordings, and 45 ten-minute windows. This is conversion parity; historical scores are not measurements of a fresh release decode.
+Captioning results for the released checkpoint:
 
 | Evaluation | TER ↓ | GER ↓ | tcpCapSim ↑ |
 | --- | ---: | ---: | ---: |
 | Short, 1,500 clips | 13.01 | 15.93 | 64.59 |
 | Long, 4 recordings | 44.84 | 11.46 | 50.85 |
-| Long, 45 windows | 41.30 | 10.24 | 50.87 |
+| Long, 45 ten-minute windows | 41.30 | 10.24 | 50.87 |
 
-Values are percentages from the saved scoring2-v5 evaluation. All inputs are included. Three full recordings and two windows contain partial/truncated output; two short clips have empty output. Consult the model's `evaluation.json` for exact scores and coverage. The newer optional `--future-start-guard` conversion policy changes predictions and must not be reported with these historical metrics.
+Values are percentages from the saved evaluation, using `speech_caption_insensitive_overlap_v2` conversion. All examples are included, including partial/truncated outputs in three full recordings and two windows, and two empty short outputs. These are historical checkpoint results; they are not scores from a new container run. The [model card](https://huggingface.co/JinchuanTian/LongCap-35B-A3B) also reports the checkpoint's speech recognition and diarization results, with full values in its `evaluation.json`.
 
-The CPU test suite covers model and server identity, upload transport, input-label isolation, retry/resume behavior, partial-output reporting, and conversion. Run it with `python -m pip install '.[test]'` followed by `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q`. Container-build and GPU validation status are recorded separately in `VALIDATION.md`.
+The [long benchmark](https://huggingface.co/datasets/JinchuanTian/LongCap-Long) contains four recordings with 6,520 reference events and the saved model predictions. It distributes source URLs and annotations. Audio and video are not bundled. See [reproducibility and limitations](VALIDATION.md) for inference checks and long-recording coverage.
 
-## Citation and license
+## Getting started
 
-Please cite *LongCap: Hour-Scale Timestamped Audio Captioning via Chunk-wise Processing* by Jinchuan Tian and colleagues. Author details are in [CITATION.cff](CITATION.cff). An arXiv identifier will be added after submission.
+Use Python 3.12 on Linux. The client runs on CPU; the server targets one H100 80GB with CUDA 13.0 and tensor parallel size 1.
 
-Code is provided under [Apache-2.0](LICENSE). See [third-party notices](docs/THIRD_PARTY_NOTICES.md). Model weights and benchmark annotations carry their separately supplied licenses; this code license does not cover the paper or linked source media.
+```bash
+git clone https://github.com/jctian98/longcap-code.git
+cd longcap-code
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements/client.lock
+python -m pip install --no-deps .
+
+hf download JinchuanTian/LongCap-35B-A3B --local-dir ./models/LongCap-35B-A3B
+longcap verify-model --model ./models/LongCap-35B-A3B
+```
+
+The model occupies approximately 38.43 GB across 21 weight shards. Download the complete directory, including `SHA256SUMS`. Use `hf auth login` if repository access requires authentication. For reproducible downloads, select the model revision in the release manifest with `hf download --revision`.
+
+### Start the server
+
+Install Docker and NVIDIA Container Toolkit, then launch the inference image:
+
+```bash
+mkdir -p cache
+docker run --rm --gpus '"device=0"' --shm-size=16g \
+  -p 127.0.0.1:20000:20000 \
+  -v "$PWD/models/LongCap-35B-A3B:/models/longcap-35b-a3b:ro" \
+  -v "$PWD/cache:/cache" \
+  ghcr.io/jctian98/longcap:0.1.0-rc.2
+```
+
+Use `docker login ghcr.io` if package access requires authentication. Wait for `http://127.0.0.1:20000/health` to return success. [Docker details](docs/DOCKER.md) cover driver requirements, running the client in a container, and building the image locally.
+
+### Audio captioning
+
+```bash
+longcap caption --audio /absolute/path/to/example.wav --key example \
+  --model ./models/LongCap-35B-A3B \
+  --service http://127.0.0.1:20000 --output ./outputs/captions
+```
+
+### Speech recognition and diarization
+
+```bash
+longcap diarize --audio /absolute/path/to/example.wav --key example \
+  --model ./models/LongCap-35B-A3B \
+  --service http://127.0.0.1:20000 --output ./outputs/diarization
+```
+
+Both tasks use the same server and model. Use separate output directories for each task. The diarization prompt requests transcripts, speaker labels, and timestamps; it does not infer real-world speaker identities.
+
+See [inference and output formats](docs/inference.md) for batch manifests, task-specific outputs, decoding, and resume. Repeat an identical command to resume its saved request journal. A changed input, task, model, implementation, or decoding configuration requires a fresh output directory. Inspect `raw/client.json` for coverage and errors; exit status 2 indicates incomplete output or exhausted retries.
+
+## Citation
+
+If you use LongCap, please cite:
+
+```bibtex
+@misc{tian2026longcap,
+  title = {LongCap: Hour-Scale Timestamped Audio Captioning via Chunk-wise Processing},
+  author = {Tian, Jinchuan and Chen, Sen and Huang, Wenbin and Weng, Chao and Huang, Zhengwei and Shi, Jiatong and Lu, Yichen and Wang, Haoran and Watanabe, Shinji and Zhou, Cong},
+  year = {2026},
+  howpublished = {Preprint},
+  url = {https://jctian98.github.io/longcap/}
+}
+```
+
+## License and contributions
+
+Code is licensed under [Apache-2.0](LICENSE); see [third-party notices](docs/THIRD_PARTY_NOTICES.md). The model and benchmark include their own license files. Linked source media and the paper retain separate terms. See [CONTRIBUTING.md](CONTRIBUTING.md) for development and tests.

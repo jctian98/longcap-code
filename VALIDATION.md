@@ -1,32 +1,33 @@
-# Release validation
+# Reproducibility and known limitations
 
-Validation status as of 2026-10-26. These checks qualify the prepared artifacts; no public release or new semantic benchmark scoring has been performed.
+LongCap reports historical checkpoint evaluations separately from software and container checks. The captioning and diarization scores in the model card are saved results for the released V4 weights. The checks below establish specific implementation behavior; they do not establish semantic completeness or bitwise GPU generation reproducibility.
 
 | Check | Result |
 | --- | --- |
-| CPU test suite | 82 passed, 0 skipped; includes actual ASGI uploads, generation dispatch, server executor lifecycle, portable identity, retries/resume, and conversion |
-| Saved V4 conversion parity | Exact agreement on 1,549 records: 1,500 Short, 4 full Long, and 45 Long-window records |
+| CPU test suite | 88 passed, 0 skipped; includes ASGI uploads, generation dispatch, server lifecycle, model identity, retries/resume, caption conversion, and native diarization task routing/export |
+| Saved V4 caption conversion parity | Exact agreement on 1,549 records: 1,500 Short, 4 full Long, and 45 Long-window records |
+| Native diarization parser parity | Exact agreement with the original evaluator on 451 saved English/Chinese recordings, 9,789 turns, and 36,065 speech segments |
 | Copied model | All 21 shards independently rehashed after copying; safetensor headers, index keys, tensor offsets, and payload coverage verified; full checksums also passed on both GPU workers |
 | CPU package installation | Final wheel installed in a clean environment; CLI, dependency consistency, tokenizer round-trip, model identity, and stereo-audio preparation passed without installing or importing PyTorch/vLLM |
 | Official-base container build | Passed isolated installation from hash-locked dependencies, dependency consistency, CLI startup, pinned versions, CUDA 13.0, plugin registration, and image export |
-| Inference inside the new image | Passed 16-second and 96-second inputs under the long profile and completed-record resume on one H100 80GB; request journal unchanged |
+| Earlier image GPU smoke | Passed 16-second and 96-second inputs under the long profile and completed-record resume on one H100 80GB; request journal unchanged |
 | Four full recordings | Full-coverage check failed: three recordings reached the end; the English movie stopped at the default retry limit after 277/333 chunks. Raw records were retained; final batch prediction export was withheld. |
 
-## Image qualification
+## Container and GPU checks
 
-The image starts from the pinned official PyTorch `2.11.0-cuda13.0-cudnn9-devel` base. The base lacks `ensurepip`; `requirements/bootstrap.lock` installs hash-pinned pip into a venv created with `--without-pip`. The build service used a checksummed source archive in place of the three local `COPY` transport operations; the remaining Dockerfile instructions and source bytes were preserved.
+Registry images use the pinned official PyTorch `2.11.0-cuda13.0-cudnn9-devel` base and hash-locked dependencies. The earlier H100-tested image used a checksummed source archive in place of the Dockerfile's local `COPY` operations; its remaining build instructions and source bytes were preserved. This build difference is why its GPU results are reported separately.
 
-The verified private build has digest `sha256:244371f2678aa6bbd4257d56d69c0fc66e9f38014d44481267b4af35cb6a2a12`. A public registry destination has not been assigned. The source Dockerfile builds from the local repository using ordinary `COPY` instructions.
+The earlier image tested on H100 has digest `sha256:244371f2678aa6bbd4257d56d69c0fc66e9f38014d44481267b4af35cb6a2a12`. Registry images are distributed at `ghcr.io/jctian98/longcap`; their source revisions, digests, and build checks accompany each GitHub Release. The source Dockerfile uses ordinary `COPY` instructions. The H100 results below belong to that earlier image and do not qualify later registry digests, including the client update that adds `longcap diarize`.
 
-The actual-image GPU test used Python 3.12.3, PyTorch/torchaudio 2.11.0 with CUDA 13.0, vLLM 0.26.0, Transformers 5.14.1, one H100 80GB, and driver 580.159.03. The host allocation was 8 CPUs and 128 GB RAM; minimum host RAM was not measured. All 34 installed Python source files matched the frozen release source. Peak sampled GPU memory was 72,381 MiB, including cache reservations; this is not a minimum-memory claim. Other GPU types and tensor-parallel configurations are unverified.
+The actual-image GPU test used Python 3.12.3, PyTorch/torchaudio 2.11.0 with CUDA 13.0, vLLM 0.26.0, Transformers 5.14.1, one H100 80GB, and driver 580.159.03. The host allocation was 8 CPUs and 128 GB RAM; minimum host RAM was not measured. All 34 installed Python source files matched the captioning implementation at the time of that test. The later diarization client extension is covered by separate CPU tests; it has not been run on H100 in this release. Peak sampled GPU memory was 72,381 MiB, including cache reservations; this is not a minimum-memory claim. Other GPU types and tensor-parallel configurations are unverified.
 
-The 16-second input produced no events (`empty`); the 96-second multi-chunk input produced one music event (`ok`). These exact predictions matched the preceding isolated-wheel smoke run. All test commands exited successfully and completed-record resume left its request journal unchanged. This establishes execution, export, and resume behavior, not semantic caption completeness. Interrupted-resume behavior is covered by CPU tests, not this GPU smoke. The new image has not been tested on all four full recordings.
+The 16-second input produced no events (`empty`); the 96-second multi-chunk input produced one music event (`ok`). These exact predictions matched the preceding isolated-wheel smoke run. All test commands exited successfully and completed-record resume left its request journal unchanged. This establishes execution, export, and resume behavior, not semantic caption completeness. Interrupted-resume behavior is covered by CPU tests, not this GPU smoke. No registry release image has been qualified on all four full recordings.
 
 ## Full-duration and historical comparisons
 
 The separate full-recording run used the same installed release Python source and core model-runtime versions, with an existing dependency environment and Python 3.12.13. Its transitive package versions differ from the freshly resolved container lock. These results are distinct from the actual-image smoke and do not establish exact container decode parity.
 
-The four-recording stage finished in 179.1 minutes with concurrency 4 on one H100 80GB. Peak sampled GPU memory was 72,747 MiB. All four raw result records were retained, with no request errors. Full recording coverage failed because the English movie reached the default limit of 20 distinct retried chunks. The CLI exited with status 2; the validation driver marked the coverage check failed. No guard, checkpoint, or runtime source was changed to obtain a different outcome, and no inference rerun was performed.
+The four-recording stage finished in 179.1 minutes with concurrency 4 on one H100 80GB. Peak sampled GPU memory was 72,747 MiB. All four raw result records were retained, with no request errors. Full recording coverage failed because the English movie reached the default limit of 20 distinct retried chunks. The CLI exited with status 2; the validation driver marked the coverage check failed. The checkpoint and retry limit were unchanged in this test.
 
 | Recording | Decoded / expected chunks | Audio coverage | Selected truncated chunks | Exhausted caption-format retry sequences |
 | --- | ---: | --- | ---: | ---: |

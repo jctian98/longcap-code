@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: If you use LongCap, please cite the accompanying paper.
+type: software
+title: LongCap
+version: 0.1.0
+license: Apache-2.0
+authors: &id001
+- given-names: Jinchuan
+  family-names: Tian
+- given-names: Sen
+  family-names: Chen
+- given-names: Wenbin
+  family-names: Huang
+- given-names: Chao
+  family-names: Weng
+- given-names: Zhengwei
+  family-names: Huang
+- given-names: Jiatong
+  family-names: Shi
+- given-names: Yichen
+  family-names: Lu
+- given-names: Haoran
+  family-names: Wang
+- given-names: Shinji
+  family-names: Watanabe
+- given-names: Cong
+  family-names: Zhou
+url: https://jctian98.github.io/longcap/
+repository-code: https://github.com/jctian98/longcap-code
+preferred-citation:
+  type: unpublished
+  title: 'LongCap: Hour-Scale Timestamped Audio Captioning via Chunk-wise Processing'
+  authors: *id001
+  year: 2026
+  url: https://jctian98.github.io/longcap/

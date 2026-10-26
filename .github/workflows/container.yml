@@ -1,0 +1,115 @@
+name: Build and publish container
+run-name: Publish LongCap ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'JSON runner labels with at least 80 GiB free, e.g. ["self-hosted", "linux", "x64", "longcap-build"]'
+        required: true
+        type: string
+      version:
+        description: Container version tag
+        required: true
+        type: string
+        default: "0.1.0-rc.1"
+
+permissions: {}
+
+concurrency:
+  group: container-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  LONGCAP_IMAGE: ghcr.io/jctian98/longcap
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  publish:
+    if: github.repository == 'jctian98/longcap-code'
+    runs-on: ${{ fromJSON(inputs.runner) }}
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check version, architecture, and build storage
+        shell: bash
+        env:
+          LONGCAP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$LONGCAP_VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo '::error::Version must be a valid Docker tag of at most 128 characters.'
+            exit 1
+          fi
+          if [[ "$RUNNER_OS" != Linux || "$RUNNER_ARCH" != X64 ]]; then
+            echo '::error::Select a Linux x64 runner for the linux/amd64 image.'
+            exit 1
+          fi
+          docker_host="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
+          if [[ "$docker_host" != unix://* ]]; then
+            echo '::error::Use a local Docker daemon so its build storage can be checked.'
+            exit 1
+          fi
+          docker_root="$(docker info --format '{{.DockerRootDir}}')"
+          required_bytes=$((80 * 1024 * 1024 * 1024))
+          for storage_path in "$GITHUB_WORKSPACE" "$docker_root"; do
+            available_bytes="$(df -PB1 "$storage_path" | awk 'NR == 2 {print $4}')"
+            if [[ ! "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < required_bytes )); then
+              echo '::error::At least 80 GiB must be free on both the workspace and Docker storage filesystems. Select a larger runner.'
+              exit 1
+            fi
+          done
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse to overwrite existing candidate tags
+        shell: bash
+        env:
+          LONGCAP_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for image_ref in "$LONGCAP_IMAGE:$LONGCAP_VERSION" "$LONGCAP_IMAGE:sha-$GITHUB_SHA"; do
+            if inspection="$(docker manifest inspect "$image_ref" 2>&1)"; then
+              echo "::error::Refusing to overwrite existing image tag $image_ref."
+              exit 1
+            elif [[ "$inspection" != *"manifest unknown"* && "$inspection" != *"no such manifest"* ]]; then
+              echo "::error::Could not establish that $image_ref is absent; refusing to publish."
+              exit 1
+            fi
+          done
+      - name: Build and publish linux/amd64 image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: mode=min
+          tags: |
+            ${{ env.LONGCAP_IMAGE }}:${{ inputs.version }}
+            ${{ env.LONGCAP_IMAGE }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/jctian98/longcap-code
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ inputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: Record published digest
+        env:
+          LONGCAP_DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          printf '%s\n' "Published image: $LONGCAP_IMAGE@$LONGCAP_DIGEST" >> "$GITHUB_STEP_SUMMARY"

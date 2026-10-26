@@ -1,0 +1,42 @@
+# Release validation
+
+Validation status as of 2026-10-26. These checks qualify the prepared artifacts; no public release or new semantic benchmark scoring has been performed.
+
+| Check | Result |
+| --- | --- |
+| CPU test suite | 82 passed, 0 skipped; includes actual ASGI uploads, generation dispatch, server executor lifecycle, portable identity, retries/resume, and conversion |
+| Saved V4 conversion parity | Exact agreement on 1,549 records: 1,500 Short, 4 full Long, and 45 Long-window records |
+| Copied model | All 21 shards independently rehashed after copying; safetensor headers, index keys, tensor offsets, and payload coverage verified; full checksums also passed on both GPU workers |
+| CPU package installation | Final wheel installed in a clean environment; CLI, dependency consistency, tokenizer round-trip, model identity, and stereo-audio preparation passed without installing or importing PyTorch/vLLM |
+| Official-base container build | Passed isolated installation from hash-locked dependencies, dependency consistency, CLI startup, pinned versions, CUDA 13.0, plugin registration, and image export |
+| Inference inside the new image | Passed 16-second and 96-second inputs under the long profile and completed-record resume on one H100 80GB; request journal unchanged |
+| Four full recordings | Full-coverage check failed: three recordings reached the end; the English movie stopped at the default retry limit after 277/333 chunks. Raw records were retained; final batch prediction export was withheld. |
+
+## Image qualification
+
+The image starts from the pinned official PyTorch `2.11.0-cuda13.0-cudnn9-devel` base. The base lacks `ensurepip`; `requirements/bootstrap.lock` installs hash-pinned pip into a venv created with `--without-pip`. The build service used a checksummed source archive in place of the three local `COPY` transport operations; the remaining Dockerfile instructions and source bytes were preserved.
+
+The verified private build has digest `sha256:244371f2678aa6bbd4257d56d69c0fc66e9f38014d44481267b4af35cb6a2a12`. A public registry destination has not been assigned. The source Dockerfile builds from the local repository using ordinary `COPY` instructions.
+
+The actual-image GPU test used Python 3.12.3, PyTorch/torchaudio 2.11.0 with CUDA 13.0, vLLM 0.26.0, Transformers 5.14.1, one H100 80GB, and driver 580.159.03. The host allocation was 8 CPUs and 128 GB RAM; minimum host RAM was not measured. All 34 installed Python source files matched the frozen release source. Peak sampled GPU memory was 72,381 MiB, including cache reservations; this is not a minimum-memory claim. Other GPU types and tensor-parallel configurations are unverified.
+
+The 16-second input produced no events (`empty`); the 96-second multi-chunk input produced one music event (`ok`). These exact predictions matched the preceding isolated-wheel smoke run. All test commands exited successfully and completed-record resume left its request journal unchanged. This establishes execution, export, and resume behavior, not semantic caption completeness. Interrupted-resume behavior is covered by CPU tests, not this GPU smoke. The new image has not been tested on all four full recordings.
+
+## Full-duration and historical comparisons
+
+The separate full-recording run used the same installed release Python source and core model-runtime versions, with an existing dependency environment and Python 3.12.13. Its transitive package versions differ from the freshly resolved container lock. These results are distinct from the actual-image smoke and do not establish exact container decode parity.
+
+The four-recording stage finished in 179.1 minutes with concurrency 4 on one H100 80GB. Peak sampled GPU memory was 72,747 MiB. All four raw result records were retained, with no request errors. Full recording coverage failed because the English movie reached the default limit of 20 distinct retried chunks. The CLI exited with status 2; the validation driver marked the coverage check failed. No guard, checkpoint, or runtime source was changed to obtain a different outcome, and no inference rerun was performed.
+
+| Recording | Decoded / expected chunks | Audio coverage | Selected truncated chunks | Exhausted caption-format retry sequences |
+| --- | ---: | --- | ---: | ---: |
+| English movie, A Star Is Born | 277 / 333 | About 91.7 / 110.7 minutes; stopped at retry limit | 4 | 4 |
+| Chinese movie, Personal Tailor | 365 / 365 | Reached the end, 117.1 minutes | 6 | 6 |
+| English Oscars | 288 / 288 | Reached the end, 93.6 minutes | 0 | 0 |
+| Chinese Roast! | 317 / 317 | Reached the end, 101.5 minutes | 0 | 1 |
+
+The run used 80 extra generation attempts across 39 retried chunks. Caption-format and repetition checks share attempts, so their separate counters must not be added. Reaching the end establishes audio coverage, not caption completeness or semantic correctness.
+
+As documented in `docs/inference.md`, an early-stopped recording withholds the batch's complete-benchmark prediction export. The raw replies and `raw/client.json` exist; final prediction JSONL and conversion summaries were not produced. There are therefore no final converted event counts, conversion statuses, or new semantic scores for this run. No diagnostic conversion was substituted for that missing export. The default retry limit remains 20; this test does not qualify uninterrupted coverage of all four recordings under that default.
+
+The retained historical full-Long scores include partial/truncated output for three of four recordings. The windowed scores include two partial/truncated windows, and two Short clips have empty output. Default conversion parity establishes that the same saved raw responses produce the same published-format predictions. It does not establish bitwise GPU generation reproducibility or new benchmark scores. The current client also has an explicit operational retry-chunk limit, documented in `docs/inference.md`, that is separate from the historical scored decodes.

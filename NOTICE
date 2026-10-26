@@ -1,0 +1,8 @@
+LongCap
+Copyright 2026 the LongCap authors.
+
+This package adapts the LongCap SpeechLM/vLLM client, server and
+postprocessing implementation into a standalone distribution. It uses
+the upstream vLLM, PyTorch, Transformers and Qwen model implementations;
+their copyright notices and licenses remain applicable to those
+dependencies. See docs/THIRD_PARTY_NOTICES.md.

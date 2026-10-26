@@ -1,0 +1,4 @@
+--index-url https://pypi.org/simple
+
+pip==25.2 \
+    --hash=sha256:6d67a2b4e7f14d8b31b8b52648866fa717f45a1eb70e83002f4331d07e953717

@@ -120,6 +120,10 @@ Use the `long` profile for diarization. In our release checks, diarization with 
 
 To serve FP8 with the `short` profile, append `serve --model /models/longcap-35b-a3b --profile short --host 0.0.0.0 --port 20000` to the FP8 command. For BF16, change `--max-model-len` to `131072`, drop the two `--yarn` options, and set `--max-num-seqs 128 --slice-cache-max 16384 --io-threads 8 --mm-processor-cache-gb 8 --max-audio-per-prompt 64`.
 
+## Disclaimer
+
+LongCap is a research release, intended for research use. It is not a product or a hosted service and has not been validated for production use. Like other AI models, it can make mistakes: it may miss or invent events, give wrong timestamps, mistranscribe speech, or mislabel speakers. Attributes such as a speaker's gender, age, or emotion are inferred from audio and may be wrong or biased. Review outputs before relying on them, and do not use them to identify people or to make decisions about them. You are responsible for how you use the model and its outputs, including having the right to process the audio you provide. The software and weights are provided "as is", without warranty of any kind, under the Apache License 2.0.
+
 ## Citation
 
 If you use LongCap, please cite:

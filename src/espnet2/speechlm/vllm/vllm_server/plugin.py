@@ -1,9 +1,9 @@
 """vLLM general-plugin entry point for the SpeechLM captioner.
 
-Registered via the minimal shim ``pyproject.toml`` next to this package:
+Registered in this package's ``pyproject.toml``:
 
     [project.entry-points."vllm.general_plugins"]
-    speechlm_captioner = "espnet2.speechlm.vllm.vllm_server.plugin:register"
+    longcap_speechlm_captioner = "espnet2.speechlm.vllm.vllm_server.plugin:register"
 
 Why an installed entry point (and not a bare ``register()`` call in the parent
 process): the ``vllm.general_plugins`` group is the *only* mechanism vLLM
@@ -13,9 +13,7 @@ builds the model — it is invoked in ``EngineCore.__init__`` and
 a registration done only in the parent is inherited *only* under ``fork`` and is
 silently lost under ``spawn`` (which vLLM auto-selects the moment CUDA is
 initialized in the parent). Keeping this entry point installed makes
-registration robust regardless of the multiprocessing start method. The module
-target resolves via ``PYTHONPATH`` (repo root), so the code stays as ordinary
-in-repo modules — only the tiny entry-point metadata is ``pip install -e .``'d.
+registration robust regardless of the multiprocessing start method.
 
 We register the architecture in *lazy string form* so importing this module (and
 thus running the plugin) does NOT import torch/vLLM model code until the

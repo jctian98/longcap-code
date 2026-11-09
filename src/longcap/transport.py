@@ -43,13 +43,14 @@ class JournalEngine:
     """Persist each response before the driver consumes it, then replay on resume.
 
     Replaying token IDs reconstructs accepted history and the exact consumed
-    format/loop retry budget. Request errors are retained and terminal for this
-    run; a fresh output directory is required for a deliberate fresh attempt.
+    format/loop retry budget. A failed request produced no response, so it is
+    not journaled and is sent again when the run resumes.
     """
 
-    def __init__(self, engine, directory: Path, decode_text=None):
+    def __init__(self, engine, directory: Path, decode_text=None, stop_event=None):
         self.engine, self.directory, self.index = engine, directory, 0
         self.decode_text = decode_text
+        self.stop_event = stop_event
         directory.mkdir(parents=True, exist_ok=True)
 
     def generate(self, requests):
@@ -64,29 +65,26 @@ class JournalEngine:
         }
         digest = hashlib.sha256(json.dumps(request, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         path = self.directory / f"{self.index:08d}.json"
-        if path.exists():
-            record = read_json(path)
+        record = read_json(path) if path.exists() else None
+        if record is not None and "error" in record:
+            record = None  # An older client journaled failures; send the request again.
+        if record is not None:
             if record["request_sha256"] != digest:
                 raise ValueError("Resumed request differs from saved token/audio history")
         else:
+            if self.stop_event is not None and self.stop_event.is_set():
+                raise InterruptedError("Stopped before sending the next request")
             record = {"request_sha256": digest, "request_index": self.index,
                       "prompt_tokens": len(req.prompt_token_ids),
                       "audio_items": len(req.audio_uuids or []),
                       "repetition_penalty": req.repetition_penalty}
-            try:
-                result = self.engine.generate(requests)[0]
-                record["response"] = {
-                    "token_ids": result.token_ids, "terminator": result.terminator,
-                    "finish_reason": result.finish_reason,
-                }
-                if self.decode_text is not None:
-                    record["text"] = self.decode_text(result.token_ids)
-            except Exception as error:
-                record["error"] = {"type": type(error).__name__, "message": str(error)}
-                write_json(path, record)
-                raise
+            result = self.engine.generate(requests)[0]
+            record["response"] = {
+                "token_ids": result.token_ids, "terminator": result.terminator,
+                "finish_reason": result.finish_reason,
+            }
+            if self.decode_text is not None:
+                record["text"] = self.decode_text(result.token_ids)
             write_json(path, record)
         self.index += 1
-        if "error" in record:
-            raise RuntimeError(f"Saved request failure: {record['error']}; use a fresh output directory to retry")
         return [GenerateResult(**record["response"])]

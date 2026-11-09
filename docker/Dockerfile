@@ -32,8 +32,13 @@ RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps . \
     && longcap diarize --help \
     && python docker/check_environment.py \
     && mkdir -p /cache /output
+# Uploaded audio, server logs, and compile caches live under the /cache mount.
+ENV VLLM_CACHE_ROOT=/cache/vllm \
+    XDG_CACHE_HOME=/cache/xdg \
+    FLASHINFER_WORKSPACE_BASE=/cache/flashinfer \
+    CUDA_CACHE_PATH=/cache/cuda
 EXPOSE 20000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=900s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:20000/health', timeout=4)" || exit 1
 ENTRYPOINT ["longcap"]
-CMD ["serve", "--model", "/models/longcap-35b-a3b", "--profile", "long", "--host", "0.0.0.0", "--port", "20000"]
+CMD ["serve", "--model", "/models/longcap-35b-a3b", "--profile", "long", "--host", "0.0.0.0", "--port", "20000", "--work-dir", "/cache/service"]

@@ -110,8 +110,15 @@ class AudioRegistry:
         if not known:
             dest = self._spool / f"{aid}{suffix}"
             if not dest.exists():
-                tmp = dest.with_suffix(dest.suffix + ".tmp")
-                tmp.write_bytes(data)
+                import tempfile
+                fd, tmp = tempfile.mkstemp(dir=self._spool, suffix=".tmp")
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(data)
+                try:
+                    sf.info(tmp)
+                except RuntimeError as error:
+                    os.unlink(tmp)
+                    raise ValueError(f"upload is not readable audio: {error}") from error
                 os.replace(tmp, dest)
             info = sf.info(str(dest))
             with self._lock:

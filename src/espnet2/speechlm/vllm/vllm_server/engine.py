@@ -190,6 +190,8 @@ class LocalEngine:
         token_ids = list(comp.token_ids)
         if comp.finish_reason == "length":
             return GenerateResult(token_ids, None, "length")
+        if comp.finish_reason != "stop":
+            raise RuntimeError(f"generation ended with finish_reason={comp.finish_reason!r}")
         # finished by a token stop. stop_reason == 3 -> <eot>; None -> <eos>.
         terminator = C.EOT if comp.stop_reason == C.EOT else C.EOS
         # vLLM may leave the stopping token in token_ids; strip one trailing

@@ -23,7 +23,8 @@ TRANSCRIPT_FIRST = re.compile(
     re.IGNORECASE,
 )
 SPEAKER_FIRST = re.compile(
-    rf"(?P<speaker>{SPEAKER})\s*,\s*(?:[^,\[\]\n]*?\s*,\s*)?"
+    # Possessive whitespace keeps matching linear on long runs of spaces.
+    rf"(?P<speaker>{SPEAKER})\s*,\s*+(?:[^,\[\]\n]*,\s*+)?"
     rf"\[\s*(?P<start>{TIMESTAMP})\s*,\s*(?P<end>{TIMESTAMP})\s*\]\s*:\s*",
     re.IGNORECASE,
 )

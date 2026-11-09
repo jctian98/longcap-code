@@ -145,6 +145,10 @@ class AsyncSpeechLMEngine:
             stat_loggers = [make_jsonl_stat_logger_factory(stats_jsonl)]
         self.engine = AsyncLLM.from_engine_args(args, stat_loggers=stat_loggers)
 
+    def is_healthy(self) -> bool:
+        """False once the vLLM engine core has failed."""
+        return not getattr(self.engine, "errored", False)
+
     def _request_id(self, tag: str) -> str:
         return f"{tag}-{self._pid}-{next(self._ids)}"
 

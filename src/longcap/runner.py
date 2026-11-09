@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -11,7 +12,7 @@ from espnet2.speechlm.vllm.vllm_client.client import CaptionerClient, build_driv
 from .identity import checkpoint_identity, require_matching_model
 from .processing.common import read_json, unique_rows, write_json
 from .processing.convert import convert_predictions
-from .processing.prepare import SYSTEM_PROMPTS, verify_prepared
+from .processing.prepare import SYSTEM_PROMPTS, resolve_chunk, verify_prepared
 from .transport import JournalEngine, UploadAudioBook
 
 
@@ -23,6 +24,36 @@ def _source_identity() -> str:
         for path in sorted(root.rglob("*.py")):
             digest.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes())
     return digest.hexdigest()
+
+
+def _service_unavailable(error: BaseException) -> bool:
+    """Connection failures and server errors: later recordings would fail too."""
+    import httpx
+
+    while error is not None:
+        if isinstance(error, httpx.TransportError):
+            return True
+        if isinstance(error, httpx.HTTPStatusError) and error.response.status_code >= 500:
+            return True
+        error = error.__cause__ or error.__context__
+    return False
+
+
+def _contact_service(service: str, timeout: float) -> dict:
+    import httpx
+
+    client = CaptionerClient(service, timeout=timeout)
+    try:
+        return client.models()
+    except httpx.HTTPError as error:
+        raise RuntimeError(
+            f"cannot reach the LongCap service at {service} ({error}). Start the server "
+            f"and wait until {service.rstrip('/')}/health responds."
+        ) from error
+    except ValueError as error:
+        raise RuntimeError(f"{service} did not answer like a LongCap service") from error
+    finally:
+        client.close()
 
 
 def _joined_rounds(record: dict) -> list:
@@ -57,11 +88,7 @@ def _run_inference(
         raise ValueError("Prepared task differs; use a fresh output directory")
     caption = task == "caption"
     identity = checkpoint_identity(model)
-    client = CaptionerClient(service, timeout=timeout)
-    try:
-        server = client.models()
-    finally:
-        client.close()
+    server = _contact_service(service, timeout)
     require_matching_model(identity, server)
     if server.get("max_audio_per_prompt", 0) < prepared["max_audio_per_prompt"]:
         raise ValueError("Server audio-item limit is below this recording's chunk count")
@@ -86,6 +113,10 @@ def _run_inference(
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(model, local_files_only=True)
 
+    # Set when the service fails or the user interrupts: recordings that have
+    # not started are skipped, and running ones stop before their next request.
+    stop = threading.Event()
+
     def one(key):
         directory = run / "raw/records" / hashlib.sha256(key.encode()).hexdigest()
         record_path = directory / "result.json"
@@ -93,7 +124,11 @@ def _run_inference(
             record = read_json(record_path)
             if record["example_id"] != key:
                 raise ValueError("Saved record identity mismatch")
-            return key, record, True
+            if record.get("error") is None:
+                return key, record, True
+            # A failed recording resumes from its request journal.
+        if stop.is_set():
+            return key, None, False
         started = time.monotonic()
         client = CaptionerClient(service, timeout=timeout)
         book = UploadAudioBook(client)
@@ -101,11 +136,16 @@ def _run_inference(
                               max_workers=1, loop_retry=caption, caption_format_retry=caption,
                               max_retried_chunks=max_retried_chunks)
         http_engine = driver.engine
-        driver.engine = JournalEngine(http_engine, directory / "attempts", driver.prompt.decode_text)
+        driver.engine = JournalEngine(http_engine, directory / "attempts",
+                                      driver.prompt.decode_text, stop_event=stop)
+        messages = [[role, kind, str(resolve_chunk(run, content)) if kind == "audio" else content]
+                    for role, kind, content in dialogues[key]["messages"]]
         try:
-            result = driver.run([(key, dialogues[key]["messages"])])[key]
+            result = driver.run([(key, messages)])[key]
             record = {**asdict(result), "error": None}
         except Exception as error:
+            if _service_unavailable(error):
+                stop.set()
             # The durable journal retains selected and rejected responses even
             # if no whole-recording result was produced.
             record = {"example_id": key, "error": {"type": type(error).__name__, "message": str(error)},
@@ -119,9 +159,16 @@ def _run_inference(
         write_json(record_path, record)
         return key, record, False
 
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+    pool = ThreadPoolExecutor(max_workers=concurrency)
+    try:
         finished = list(pool.map(one, examples))
-    records = {key: record for key, record, _ in finished}
+    except BaseException:
+        stop.set()
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
+    not_started = [key for key, record, _ in finished if record is None]
+    records = {key: record for key, record, _ in finished if record is not None}
     error_ids = [key for key, r in records.items() if r.get("error") is not None]
     early_ids = [key for key, r in records.items() if r.get("early_stop")]
     truncated_ids = [key for key, r in records.items() if r.get("truncated_hops", 0)]
@@ -129,6 +176,7 @@ def _run_inference(
         "task": task,
         "num_examples": len(examples), "num_written": len(records),
         "num_errors": len(error_ids), "error_ids": error_ids,
+        "num_not_started": len(not_started), "not_started_ids": not_started,
         "error_details": [{"key": key, "error": records[key]["error"]} for key in error_ids],
         "num_early_stopped": len(early_ids), "early_stopped_ids": early_ids,
         "early_stop_details": [{"key": key, **records[key]["early_stop"]} for key in early_ids],
@@ -145,17 +193,18 @@ def _run_inference(
     replies = {key: _joined_rounds(record) if not record.get("error") else []
                for key, record in records.items()}
     write_json(run / "raw/decode/inference_rank0/results.json", replies)
-    if error_ids or early_ids:
-        stats["prediction_export"] = "withheld: request errors or early-stopped prefixes"
+    if error_ids or not_started:
+        stats["prediction_export"] = "withheld: rerun the same command to retry failed recordings"
         write_json(run / "raw/client.json", stats)
-        return stats, 1 if error_ids else 2
+        return stats, 1
     if caption:
         conversion = convert_predictions(run, future_start_guard=future_start_guard)
     else:
         from .processing.diarization import convert_diarization
         conversion = convert_diarization(run)
     stats["conversion"] = conversion
-    incomplete = bool(truncated_ids) or any(k in conversion["statuses"] for k in ("partial", "parse_error"))
+    incomplete = bool(truncated_ids or early_ids) or any(
+        k in conversion["statuses"] for k in ("partial", "parse_error"))
     exhausted = stats["caption_retry_summary"]["num_exhausted"]
     return stats, 2 if incomplete or exhausted else 0
 

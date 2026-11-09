@@ -55,7 +55,9 @@ class CaptionerClient:
         import httpx
 
         self._httpx = httpx
-        self._c = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout)
+        # Fail fast when nothing is listening; generation may still take long.
+        self._c = httpx.Client(base_url=base_url.rstrip("/"),
+                               timeout=httpx.Timeout(timeout, connect=min(30.0, timeout)))
         # Instrumentation (gate G8c "registered once"): count register calls.
         self.num_register_calls = 0
 
@@ -89,10 +91,14 @@ class CaptionerClient:
 
     # -- endpoint wrappers --------------------------------------------------
     def health(self) -> dict:
-        return self._c.get("/health").json()
+        response = self._c.get("/health")
+        response.raise_for_status()
+        return response.json()
 
     def models(self) -> dict:
-        return self._c.get("/models").json()
+        response = self._c.get("/models")
+        response.raise_for_status()
+        return response.json()
 
     def register_path(self, path: str) -> dict:
         self.num_register_calls += 1

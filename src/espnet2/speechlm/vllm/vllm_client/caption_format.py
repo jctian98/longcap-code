@@ -25,6 +25,49 @@ _STAMP = rf"(?:{_NUMBER}|\d+:\d{{2}}:\d{{2}}:\d{{2}})"
 _TIMING = re.compile(rf"^\s*(<\s*{_STAMP}\s*,\s*{_STAMP}\s*>)\s*(.*)$")
 
 
+_LINEAGE_START = re.compile(r'^\{\s*"(?:[\d.]+\s*)?(?:ancestor|ancestors|event_index)"')
+
+
+def is_lineage(suffix: str) -> bool:
+    """True for a trailing object that holds only event-ancestry metadata.
+
+    A truncated suffix counts when it opens with a metadata field. Anything
+    else after the timestamps, such as a second event, is not lineage.
+    """
+    suffix = suffix.strip()
+    if not suffix.startswith("{"):
+        return False
+    try:
+        value = json.loads(suffix)
+    except (ValueError, RecursionError):
+        return bool(_LINEAGE_START.match(suffix))
+    return (isinstance(value, dict) and bool(value)
+            and all(_ATTRIBUTE_PREFIX.sub("", key) in _METADATA_FIELDS for key in value))
+
+
+def split_lineage(line: str) -> str | None:
+    """Return an event line without a lineage suffix; None for a metadata-only line.
+
+    Lines without metadata are returned unchanged.
+    """
+    stripped = line.lstrip()
+    try:
+        value, end = json.JSONDecoder().raw_decode(stripped)
+    except (ValueError, RecursionError):
+        return line
+    if not isinstance(value, dict):
+        return line
+    rest = stripped[end:]
+    if not rest.strip():
+        if value and all(_ATTRIBUTE_PREFIX.sub("", key) in _METADATA_FIELDS for key in value):
+            return None
+        return line
+    match = _TIMING.match(rest)
+    if match and match[2] and is_lineage(match[2]):
+        return stripped[:end] + " " + match[1]
+    return line
+
+
 def _caption_object(pairs):
     return _unique_object([(key, value) for key, value in pairs
                            if _ATTRIBUTE_PREFIX.sub("", key) not in _METADATA_FIELDS])
@@ -34,8 +77,9 @@ def strip_ancestor_metadata(text: str) -> str:
     """Exclude lineage from validation, leaving the actual model reply untouched.
 
     Locate timing after the first decoded attribute object, never inside a quoted
-    caption. A lineage suffix beginning with ``{`` is ignored even if malformed
-    or truncated. Ordinary caption syntax errors remain visible to validators.
+    caption. A trailing metadata-only object, possibly truncated, is ignored;
+    any other trailing text, such as a second event on the same line, stays
+    visible to validators.
     """
     decoder = json.JSONDecoder(object_pairs_hook=_caption_object)
     output = []
@@ -45,7 +89,7 @@ def strip_ancestor_metadata(text: str) -> str:
         try:
             attributes, end = decoder.raw_decode(line)
             match = _TIMING.match(line[end:])
-            if isinstance(attributes, dict) and match and (not match[2] or match[2].startswith("{")):
+            if isinstance(attributes, dict) and match and (not match[2] or is_lineage(match[2])):
                 candidate = json.dumps(attributes, ensure_ascii=False) + " " + match[1]
             elif attributes == {} and not line[end:].strip():
                 original = json.loads(line)

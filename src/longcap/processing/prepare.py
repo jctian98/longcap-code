@@ -68,7 +68,9 @@ def _prepare_example(arguments: tuple[dict, str, int]) -> dict:
                 {
                     "start": start,
                     "end": end,
-                    "audio_path": str(chunk_path),
+                    # Relative to the run directory, so a copied or remounted run
+                    # checks and uploads its own chunks.
+                    "audio_path": str(chunk_path.relative_to(Path(output_directory).parents[1])),
                     "sha256": file_sha256(chunk_path),
                 }
             )
@@ -87,7 +89,14 @@ def _prepare_example(arguments: tuple[dict, str, int]) -> dict:
     }
 
 
-def verify_prepared(run_directory: Path) -> dict:
+def resolve_chunk(run_directory: Path, path: str) -> Path:
+    """Chunk paths are run-relative; absolute paths come from older runs."""
+    chunk = Path(path)
+    return chunk if chunk.is_absolute() else run_directory / chunk
+
+
+def verify_prepared(run_directory: Path, *, check_source: bool = False) -> dict:
+    """Check prepared inputs; the source audio is needed only to re-prepare."""
     inputs = run_directory / "inputs"
     report = read_json(inputs / "preparation.json")
     for filename, digest in report["output_sha256"].items():
@@ -95,10 +104,10 @@ def verify_prepared(run_directory: Path) -> dict:
             raise ValueError(f"Prepared input changed: {inputs / filename}")
     examples = unique_rows(inputs / "chunks.jsonl")
     for row in examples.values():
-        if row.get("source_sha256") and file_sha256(Path(row["audio_path"])) != row["source_sha256"]:
+        if check_source and row.get("source_sha256") and file_sha256(Path(row["audio_path"])) != row["source_sha256"]:
             raise ValueError(f"Source audio changed: {row['audio_path']}")
         for chunk in row["chunks"]:
-            if file_sha256(Path(chunk["audio_path"])) != chunk["sha256"]:
+            if file_sha256(resolve_chunk(run_directory, chunk["audio_path"])) != chunk["sha256"]:
                 raise ValueError(f"Prepared audio changed: {chunk['audio_path']}")
     return report
 
@@ -128,7 +137,7 @@ def prepare_inputs(
         "preparer_sha256": file_sha256(Path(__file__)),
     }
     if (inputs / "preparation.json").exists():
-        report = verify_prepared(run_directory)
+        report = verify_prepared(run_directory, check_source=True)
         if report["identity"] != identity:
             raise ValueError("Preparation settings changed; use a new run directory")
         return report
@@ -154,6 +163,9 @@ def prepare_inputs(
     for key, source in unique_rows(manifest_path).items():
         # Select only inference fields. In particular, do not copy benchmark
         # events, captions, or curation metadata into any model request.
+        missing = [field for field in ("audio_path", "duration") if field not in source]
+        if missing:
+            raise ValueError(f"{key}: manifest row is missing {', '.join(missing)}")
         audio_path = Path(source["audio_path"]).expanduser()
         if not audio_path.is_absolute():
             audio_path = manifest_path.parent / audio_path

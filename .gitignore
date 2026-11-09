@@ -6,6 +6,8 @@ __pycache__/
 build/
 dist/
 output/
+outputs/
+inputs/
 cache/
 models/
 *.safetensors

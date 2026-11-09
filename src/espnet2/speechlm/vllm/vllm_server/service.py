@@ -1,30 +1,21 @@
-"""Stateless FastAPI service around the async SpeechLM engine.
+"""LongCap inference server: a stateless FastAPI service around the vLLM engine.
 
-The service owns the GPUs and holds **no dialogue state** — every ``/generate``
-call carries the full wire-form prefix. Multi-hop reuse across calls is pure
-vLLM prefix caching (keyed by the stable audio uuids), never a session (the
-plan's stateless requirement; also the shape verl's rollout wraps). Audio is the
-only server-side state, and it is an idempotent content-addressed *cache*, not
-per-request state: register once, reference by ``(audio_id, start, end)`` for
-every hop.
+Every ``/generate`` call carries the full dialogue prefix; the server keeps no
+dialogue state beyond a content-addressed cache of uploaded audio. Prefix
+caching makes repeated prefixes cheap.
 
 Endpoints:
-- ``GET  /health``       — liveness + registered-audio count.
-- ``GET  /models``       — engine configuration.
-- ``POST /audio``        — register a shared-FS path → ``audio_id``.
-- ``POST /audio/upload`` — register uploaded bytes → ``audio_id`` (spooled).
-- ``POST /generate``     — one assistant segment (wire prompt + audio refs).
-- ``POST /score``        — teacher-forced ``prompt_logprobs`` (alignment/verl).
+- ``GET  /health``       — 200 while the engine is running, 503 after it fails.
+- ``GET  /models``       — checkpoint identity and serving configuration.
+- ``POST /audio/upload`` — upload a WAV or FLAC chunk; returns its ``audio_id``.
+- ``POST /audio``        — register a server-side path (only with ``--allow-audio-paths``).
+- ``POST /generate``     — generate one assistant segment.
+- ``POST /score``        — teacher-forced prompt log-probabilities.
 
-``/generate`` mirrors ``LocalEngine`` exactly once the audio refs are resolved
-to waveforms, so a served decode equals the offline decode. The audio-seed count
-in the wire prompt must equal the number of audio segments (each audio is one
-``id 0`` seed the plugin expands); a mismatch is a 422 with the expected count.
+Most users start it with ``longcap serve``. To run it directly::
 
-Run (vllm env), single dense replica on one GPU::
-
-    CUDA_VISIBLE_DEVICES=0 envs/vllm/bin/python -m espnet2.speechlm.vllm.vllm_server.service \\
-        --model artifacts/model_0.8b_step_50000 --port 8000
+    python -m espnet2.speechlm.vllm.vllm_server.service \\
+        --model /models/longcap-35b-a3b --spool-dir service-work/audio-spool
 """
 
 from __future__ import annotations
@@ -32,8 +23,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import json
 import os
+import signal
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 from starlette.requests import Request
@@ -102,16 +97,16 @@ async def _await_disconnect_aware(
 # required" on ["query","body"]).
 class SegmentRef(BaseModel):
     audio_id: str
-    start_sample: int = 0
-    end_sample: int | None = None
+    start_sample: int = Field(default=0, ge=0)
+    end_sample: int | None = Field(default=None, gt=0)
 
 
 class Sampling(BaseModel):
-    max_tokens: int = 4096
-    min_tokens: int = 1
-    temperature: float = 0.0
-    top_k: int = -1
-    mode: str = "content"  # content | choice | none
+    max_tokens: int = Field(default=4096, ge=1)
+    min_tokens: int = Field(default=1, ge=0)
+    temperature: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    top_k: int = Field(default=-1, ge=-1)
+    mode: Literal["content", "choice", "none"] = "content"
     repetition_penalty: float = Field(default=1.0, gt=0, allow_inf_nan=False)
 
 
@@ -120,7 +115,7 @@ class PathBody(BaseModel):
 
 
 class GenerateBody(BaseModel):
-    prompt_token_ids: list[int]
+    prompt_token_ids: list[int] = Field(min_length=1)
     audio_segments: list[SegmentRef] = Field(default_factory=list)
     sampling: Sampling = Field(default_factory=Sampling)
 
@@ -132,13 +127,13 @@ class GenerateResponse(BaseModel):
 
 
 class ScoreBody(BaseModel):
-    prompt_token_ids: list[int]
+    prompt_token_ids: list[int] = Field(min_length=1)
     audio_segments: list[SegmentRef] = Field(default_factory=list)
-    top_logprobs: int = 32
+    top_logprobs: int = Field(default=32, ge=1)
     # Return only the last `tail` positions (0 = all). The engine still scores
     # the full sequence; this only trims the JSON payload — a 93k-token deep-
     # context probe would otherwise ship tens of MB of logprobs per call.
-    tail: int = 0
+    tail: int = Field(default=0, ge=0)
 
 
 class ScoreResponse(BaseModel):
@@ -147,8 +142,30 @@ class ScoreResponse(BaseModel):
     num_positions: int = 0
 
 
-def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dict):
+# Uploaded chunks are at most 32 s; these bounds reject malformed requests
+# before they reach the GPU.
+MAX_UPLOAD_BYTES = 64 << 20
+MAX_SEGMENT_SECONDS = 120.0
+UPLOAD_SUFFIXES = {".wav", ".flac"}
+
+
+def _engine_dead_error():
+    try:
+        from vllm.v1.engine.exceptions import EngineDeadError
+    except ImportError:
+        return None
+    return EngineDeadError
+
+
+def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dict,
+               limits: dict | None = None):
     from fastapi import FastAPI, HTTPException
+    from fastapi.responses import JSONResponse
+
+    limits = limits or {}
+    vocab_size = limits.get("vocab_size")
+    max_model_len = config.get("max_model_len")
+    max_audio = config.get("max_audio_per_prompt")
 
     io_threads = config.get("io_threads", 0)
     io_pool = ThreadPoolExecutor(max_workers=io_threads, thread_name_prefix="longcap-audio") if io_threads > 0 else None
@@ -163,10 +180,44 @@ def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dic
 
     app = FastAPI(title="LongCap audio captioner", version="0.1.0", lifespan=lifespan)
 
+    def _healthy() -> bool:
+        check = getattr(engine, "is_healthy", None)
+        return check() if callable(check) else True
+
+    def _shutdown_soon():
+        # A failed engine cannot recover in-process; exit so a supervisor or
+        # the user restarts the server. Clients resume from their journals.
+        asyncio.get_running_loop().call_later(1.0, os.kill, os.getpid(), signal.SIGTERM)
+
+    @app.exception_handler(ValueError)
+    async def invalid_request(request, exc):
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    dead_error = _engine_dead_error()
+    if dead_error is not None:
+        @app.exception_handler(dead_error)
+        async def engine_dead(request, exc):
+            _shutdown_soon()
+            return JSONResponse(status_code=503, content={"detail": "engine failed; server is shutting down"})
+
+    def _check_segment(s: SegmentRef):
+        entry = registry.get(s.audio_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"unknown audio_id {s.audio_id!r}")
+        end = entry.num_frames if s.end_sample is None else s.end_sample
+        if not s.start_sample < end <= entry.num_frames:
+            raise HTTPException(status_code=422, detail=(
+                f"segment [{s.start_sample}, {end}) is outside audio {s.audio_id!r} "
+                f"of {entry.num_frames} frames"))
+        if (end - s.start_sample) / entry.sample_rate > MAX_SEGMENT_SECONDS:
+            raise HTTPException(status_code=422, detail=(
+                f"audio segments are limited to {MAX_SEGMENT_SECONDS:.0f} seconds"))
+
     def _resolve_segments(segs: list[SegmentRef]):
         """Registry refs -> (waveforms, uuids). Raises HTTPException on miss."""
         waves, uuids = [], []
         for s in segs:
+            _check_segment(s)
             try:
                 wav = registry.slice_16k(s.audio_id, s.start_sample, s.end_sample)
             except KeyError:
@@ -178,6 +229,15 @@ def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dic
         return waves, uuids
 
     def _check_seeds(prompt_token_ids, n_segments):
+        if max_audio is not None and n_segments > max_audio:
+            raise HTTPException(status_code=422, detail=(
+                f"{n_segments} audio segments exceed this server's limit of {max_audio}"))
+        if max_model_len is not None and len(prompt_token_ids) > max_model_len:
+            raise HTTPException(status_code=422, detail=(
+                f"prompt of {len(prompt_token_ids)} tokens exceeds max_model_len {max_model_len}"))
+        bad = [t for t in prompt_token_ids if t < 0 or (vocab_size is not None and t >= vocab_size)]
+        if bad:
+            raise HTTPException(status_code=422, detail=f"token ids out of range, e.g. {bad[0]}")
         n_seed = sum(1 for t in prompt_token_ids if t == C.AUDIO_PLACEHOLDER)
         if n_seed != n_segments:
             raise HTTPException(
@@ -191,6 +251,9 @@ def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dic
 
     @app.get("/health")
     async def health():
+        if not _healthy():
+            _shutdown_soon()
+            return JSONResponse(status_code=503, content={"status": "engine failed"})
         return {"status": "ok", "model": config["model"],
                 "num_registered": registry.num_registered,
                 "slice_cache": {"hits": registry.slice_hits,
@@ -212,9 +275,15 @@ def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dic
 
     @app.post("/audio/upload")
     async def upload_audio(file: UploadFile):
-        data = await file.read()
-        suffix = os.path.splitext(file.filename or "")[1] or ".wav"
-        return registry.register_bytes(data, suffix=suffix)
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="audio chunks are limited to 64 MiB")
+        suffix = os.path.splitext(file.filename or "")[1].lower()
+        suffix = suffix if suffix in UPLOAD_SUFFIXES else ".wav"
+        try:
+            return await asyncio.to_thread(registry.register_bytes, data, suffix)
+        except ValueError as error:
+            raise HTTPException(status_code=415, detail=str(error)) from error
 
     async def _resolve_segments_async(segs: list[SegmentRef]):
         """Run segment resolution off the event loop when --io-threads > 0.
@@ -364,17 +433,26 @@ def build_app_from_args(args) -> "object":
         "yarn_rope_parameters": engine.yarn_rope_parameters,
     }
     _ENGINE, _REGISTRY, _CONFIG = engine, registry, config
-    return _build_app(engine, registry, config)
+    return _build_app(engine, registry, config, limits={"vocab_size": _vocab_size(args.model)})
+
+
+def _vocab_size(model_dir) -> int | None:
+    config = json.loads((Path(model_dir) / "config.json").read_text())
+    for section in (config, config.get("text_config") or {}):
+        if isinstance(section.get("vocab_size"), int):
+            return section["vocab_size"]
+    return None
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", required=True, help="HF model dir (exported)")
     ap.add_argument("--allow-audio-paths", action="store_true", default=False)
-    ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8000)
-    ap.add_argument("--spool-dir", default=None,
-                    help="dir for uploaded-audio spool (required for /audio/upload)")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on; use 0.0.0.0 inside a container")
+    ap.add_argument("--port", type=int, default=20000)
+    ap.add_argument("--spool-dir", default="service-work/audio-spool",
+                    help="directory for uploaded audio chunks")
     # Defaults below are the measured-best single-GPU serving config for the
     # long-audio multi-hop job at 128-way concurrency (2026-08-27 study,
     # espnet2/speechlm/vllm/THROUGHPUT.md): 218x realtime steady on 1x H100
@@ -426,7 +504,7 @@ def main(argv=None) -> int:
     ap.add_argument("--torch-num-threads", type=int, default=16,
                     help=">0: cap torch intra-op threads in the API process "
                     "(featurization); avoids multi-replica CPU thrash")
-    ap.add_argument("--mm-processor-cache-gb", type=float, default=32.0,
+    ap.add_argument("--mm-processor-cache-gb", type=float, default=8.0,
                     help="vLLM multimodal processor cache size in GiB (vLLM's "
                     "own default is 4). Sized in cached mel items (~1.5 MB / "
                     "30 s clip); the live set at 256-way concurrency is "

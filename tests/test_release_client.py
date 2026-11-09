@@ -103,9 +103,11 @@ def test_preparation_isolates_labels_and_detects_original_audio_change(tmp_path)
     assert len(rows[0]["chunks"]) >= 2
     assert rows[0]["chunks"][0]["start"] == 0
     assert rows[0]["chunks"][-1]["end"] == 47.5
+    assert not Path(rows[0]["chunks"][0]["audio_path"]).is_absolute()
     sf.write(Path(rows[0]["audio_path"]), np.ones((760000, 2)), 16000)
+    verify_prepared(run)  # Inference and conversion need only the prepared chunks.
     with pytest.raises(ValueError, match="Source audio changed"):
-        verify_prepared(run)
+        verify_prepared(run, check_source=True)
 
 
 class ScriptedEngine:
@@ -142,19 +144,19 @@ def test_interrupted_journal_replays_retries_without_respending_budget(tmp_path)
     assert result.message_round_indices == [0, 1]
 
 
-def test_journal_retains_terminal_failure_and_refuses_changed_request(tmp_path):
+def test_failed_request_is_resent_on_resume_and_changed_request_is_refused(tmp_path):
     from espnet2.speechlm.vllm.vllm_client.protocol import GenerateRequest
     request = GenerateRequest([1, 5, 7, 300])
     first = JournalEngine(ScriptedEngine([RuntimeError("network unavailable")]), tmp_path)
     with pytest.raises(RuntimeError, match="network"):
         first.generate([request])
-    next_engine = ScriptedEngine([])
-    with pytest.raises(RuntimeError, match="Saved request failure"):
-        JournalEngine(next_engine, tmp_path).generate([request])
-    assert next_engine.requests == []
+    assert list(tmp_path.glob("*.json")) == []
+    next_engine = ScriptedEngine([(VALID, "eos")])
+    assert JournalEngine(next_engine, tmp_path).generate([request])[0].finish_reason == "eos"
+    assert len(next_engine.requests) == 1
     request.prompt_token_ids.append(301)
     with pytest.raises(ValueError, match="differs"):
-        JournalEngine(next_engine, tmp_path).generate([request])
+        JournalEngine(ScriptedEngine([]), tmp_path).generate([request])
 
 
 def test_eot_segments_retain_round_mapping():
@@ -272,3 +274,117 @@ from longcap.transport import UploadAudioBook
 assert 'torch' not in sys.modules and 'vllm' not in sys.modules
 '''
     subprocess.run([sys.executable, "-c", script], check=True, env=os.environ.copy())
+
+
+def test_batch_resumes_after_service_outage(tmp_path, monkeypatch):
+    import httpx
+    model = model_fixture(tmp_path / "model")
+    identity = checkpoint_identity(model)
+    rows = []
+    for key in ("a", "b", "c"):
+        path = tmp_path / f"{key}.wav"
+        sf.write(path, np.zeros(16000), 16000)
+        rows.append({"key": key, "audio_path": str(path), "duration": 1.0})
+    write_jsonl(tmp_path / "manifest.jsonl", rows)
+    run = tmp_path / "run"
+    prepare_inputs(tmp_path / "manifest.jsonl", run, workers=1)
+    state = {"down": False, "generations": 0, "outage": True}
+
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        def models(self): return {"checkpoint": identity, "model": "x", "max_audio_per_prompt": 64}
+        def close(self): pass
+        def register_bytes(self, data, filename):
+            if state["down"]:
+                raise httpx.ConnectError("Connection refused")
+            info = sf.info(io.BytesIO(data))
+            return {"audio_id": hashlib.sha256(data).hexdigest(), "num_frames": info.frames,
+                    "sample_rate": info.samplerate}
+        def generate(self, prompt, audio, sampling):
+            state["generations"] += 1
+            state["down"] = state["outage"]  # The server goes away after its first reply.
+            return {"token_ids": PROMPT.encode_text(VALID), "terminator": 2, "finish_reason": "eos"}
+
+    monkeypatch.setattr(runner, "CaptionerClient", Client)
+    report, code = runner.run_caption(run, model, "http://fake", tokenizer=Tokenizer())
+    assert code == 1 and report["error_ids"] == ["b"] and report["not_started_ids"] == ["c"]
+    state.update(down=False, generations=0, outage=False)  # The server is back.
+    report, code = runner.run_caption(run, model, "http://fake", tokenizer=Tokenizer())
+    assert code == 0 and report["num_resumed"] == 1 and state["generations"] == 2
+    assert len((run / "predictions/predictions.jsonl").read_text().splitlines()) == 3
+
+
+def test_copied_run_checks_and_uses_its_own_chunks(tmp_path):
+    import shutil
+    from longcap.cli import main
+    run = prepared_fixture(tmp_path / "original")
+    write_json(run / "raw/client.json", {"num_errors": 0, "num_written": 1, "num_examples": 1,
+                                         "num_truncated": 0, "truncated_ids": []})
+    write_json(run / "raw/decode/inference_rank0/results.json", {"sample": [["assistant", "text", [VALID]]]})
+    copy = tmp_path / "copy"
+    shutil.copytree(run, copy)
+    shutil.rmtree(run)
+    assert main(["convert", "--run", str(copy)]) == 0
+    chunk = json.loads((copy / "inputs/chunks.jsonl").read_text())["chunks"][0]
+    (copy / chunk["audio_path"]).write_bytes(b"changed")
+    assert main(["convert", "--run", str(copy)]) == 1
+
+
+def test_format_check_and_converter_agree_on_metadata_and_extra_events():
+    from espnet2.speechlm.vllm.vllm_client.caption_format import caption_format_error
+    from longcap.processing.convert import parse_turn
+    two_events = '{"type":"speech","transcript":"hi"} <0, 1> {"type":"speech","transcript":"yo"} <1, 2>'
+    assert caption_format_error(two_events) is not None
+    lineage = '{"type":"speech","transcript":"hi"} <0, 1> {"ancestor": 0}'
+    assert caption_format_error(lineage) is None
+    events, issues = parse_turn(lineage, 10.0)
+    assert issues == [] and events == [{"start": 10.0, "end": 11.0,
+                                        "attributes": {"type": "speech", "transcript": "hi"}}]
+    inline = '{"event_index": 3, "type":"speech","transcript":"hi"} <0, 1>'
+    assert caption_format_error(inline) is None
+    events, issues = parse_turn(inline, 0.0)
+    assert issues == [] and "event_index" not in events[0]["attributes"]
+    metadata_line = VALID + '\n{"ancestors": [0]}'
+    assert caption_format_error(metadata_line) is None
+    events, issues = parse_turn(metadata_line, 0.0)
+    assert issues == [] and len(events) == 1
+    plain, _ = parse_turn(VALID, 5.0)
+    assert plain[0]["attributes"] == {"type": "speech", "transcript": "hello"}
+
+
+def test_early_stopped_recording_exports_partial_prefix(tmp_path):
+    from longcap.cli import main
+    run = prepared_fixture(tmp_path / "input", seconds=47.5)
+    chunks = json.loads((run / "inputs/chunks.jsonl").read_text())["chunks"]
+    assert len(chunks) >= 2
+    write_json(run / "raw/client.json", {"num_errors": 0, "num_written": 1, "num_examples": 1,
+                                         "num_truncated": 0, "truncated_ids": [],
+                                         "num_early_stopped": 1, "early_stopped_ids": ["sample"]})
+    write_json(run / "raw/decode/inference_rank0/results.json", {"sample": [["assistant", "text", [VALID]]]})
+    assert main(["convert", "--run", str(run)]) == 2
+    status = json.loads((run / "predictions/conversion.jsonl").read_text())
+    assert status["status"] == "partial" and status["issues"][0]["reason"] == "early_stop"
+    assert json.loads((run / "predictions/predictions.jsonl").read_text())["events"]
+
+
+def test_cli_reports_unreachable_service_without_traceback(tmp_path, capsys):
+    from longcap.cli import main
+    model = model_fixture(tmp_path / "model")
+    audio = tmp_path / "clip.wav"
+    sf.write(audio, np.zeros(16000), 16000)
+    code = main(["caption", "--audio", str(audio), "--model", str(model),
+                 "--service", "http://127.0.0.1:9", "--output", str(tmp_path / "out")])
+    error = capsys.readouterr().err
+    assert code == 1 and "cannot reach the LongCap service at http://127.0.0.1:9" in error
+    assert "Traceback" not in error
+    missing = main(["caption", "--audio", str(tmp_path / "nope.wav"), "--model", str(model),
+                    "--output", str(tmp_path / "out2")])
+    assert missing == 1 and "audio file not found" in capsys.readouterr().err
+
+
+def test_manifest_without_duration_is_a_clear_error(tmp_path):
+    audio = tmp_path / "clip.wav"
+    sf.write(audio, np.zeros(16000), 16000)
+    write_jsonl(tmp_path / "manifest.jsonl", [{"key": "x", "audio_path": str(audio)}])
+    with pytest.raises(ValueError, match="missing duration"):
+        prepare_inputs(tmp_path / "manifest.jsonl", tmp_path / "run", workers=1)

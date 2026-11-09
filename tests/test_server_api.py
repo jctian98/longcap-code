@@ -50,6 +50,22 @@ def test_upload_generate_and_disabled_file_access(tmp_path):
             assert engine.requests[0].audio[0][0].shape == (16000,)
             bad = await client.post("/generate", json={"prompt_token_ids": [1, 0], "audio_segments": []})
             assert bad.status_code == 422
+            segment = {"audio_id": meta["audio_id"], "start_sample": 0, "end_sample": 16000}
+            for body in (
+                {"prompt_token_ids": [1, -5, 0, 2], "audio_segments": [segment]},
+                {"prompt_token_ids": [], "audio_segments": []},
+                {"prompt_token_ids": [1, 0, 2], "audio_segments": [{**segment, "start_sample": -4800}]},
+                {"prompt_token_ids": [1, 0, 2], "audio_segments": [{**segment, "end_sample": 10 ** 9}]},
+                {"prompt_token_ids": [1, 0, 2], "audio_segments": [{**segment, "start_sample": 16000}]},
+                {"prompt_token_ids": [1, 0, 2], "audio_segments": [segment], "sampling": {"mode": "bogus"}},
+                {"prompt_token_ids": [1, 0, 2], "audio_segments": [segment], "sampling": {"max_tokens": 0}},
+            ):
+                rejected = await client.post("/generate", json=body)
+                assert rejected.status_code == 422, body
+            garbage = await client.post("/audio/upload", files={"file": ("x.wav", b"not audio")})
+            assert garbage.status_code == 415
+            assert not [p for p in registry._spool.iterdir() if p.suffix == ".tmp"]
+            assert len(engine.requests) == 1
     asyncio.run(scenario())
 
 
@@ -57,6 +73,9 @@ def test_audio_resolution_respects_worker_limit_and_shutdown():
     class Registry:
         active = peak = 0
         lock = threading.Lock()
+        def get(self, audio_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(num_frames=16, sample_rate=16000)
         def slice_16k(self, *args):
             with self.lock:
                 self.active += 1
@@ -82,3 +101,29 @@ def test_audio_resolution_respects_worker_limit_and_shutdown():
                 assert all(reply.status_code == 200 for reply in replies)
     asyncio.run(scenario())
     assert registry.peak == 2 and registry.active == 0
+
+
+def test_health_reports_failed_engine():
+    pytest.importorskip("fastapi")
+    from espnet2.speechlm.vllm.vllm_server import service
+    from espnet2.speechlm.vllm.vllm_server.audio_registry import AudioRegistry
+
+    class DeadEngine:
+        def is_healthy(self):
+            return False
+
+    stopped = []
+    original = service.os.kill
+    service.os.kill = lambda pid, sig: stopped.append(sig)
+    try:
+        app = _build_app(DeadEngine(), AudioRegistry(), {"model": "test"})
+
+        async def scenario():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                reply = await client.get("/health")
+                assert reply.status_code == 503
+                await asyncio.sleep(1.2)
+        asyncio.run(scenario())
+    finally:
+        service.os.kill = original
+    assert stopped == [service.signal.SIGTERM]

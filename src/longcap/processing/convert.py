@@ -16,6 +16,7 @@ from .common import (
     write_json,
     write_jsonl,
 )
+from espnet2.speechlm.vllm.vllm_client.caption_format import split_lineage
 from .prepare import verify_prepared
 from .deduplicate import POLICY_VERSION, deduplicate_events, inspect_chunk
 from .future_start_guard import POLICY_VERSION as POSTPROCESSING_POLICY, filter_future_starts
@@ -27,6 +28,7 @@ CLOCK_LINE = re.compile(
     r"(\d+:\d{2}:\d{2}:\d{2})\s*>\s*$"
 )
 ATTRIBUTE_PREFIX = re.compile(r"^[\d.]+\s*")
+METADATA_FIELDS = frozenset({"ancestor", "ancestors", "event_index"})
 
 
 def _clock_seconds(value: str) -> float:
@@ -47,6 +49,10 @@ def parse_turn(text: str, chunk_start: float) -> tuple[list[dict], list[dict]]:
             or line.startswith(("start time:", "end time:"))
         ):
             continue
+        # Ancestry metadata is ignored, matching the retry-time format check.
+        line = split_lineage(line)
+        if line is None:
+            continue
         relative = EVENT_LINE.match(line)
         match = relative or CLOCK_LINE.match(line)
         if match is None:
@@ -58,6 +64,8 @@ def parse_turn(text: str, chunk_start: float) -> tuple[list[dict], list[dict]]:
             attributes = json.loads(match[1], object_pairs_hook=unique_object)
             if not isinstance(attributes, dict):
                 raise ValueError("attributes must be an object")
+            attributes = {name: value for name, value in attributes.items()
+                          if ATTRIBUTE_PREFIX.sub("", name) not in METADATA_FIELDS}
             # Reject non-JSON NaN/Infinity values without rewriting the event.
             json.dumps(attributes, allow_nan=False)
             if relative:
@@ -84,7 +92,8 @@ def parse_turn(text: str, chunk_start: float) -> tuple[list[dict], list[dict]]:
         if len(normalized_names) != len(set(normalized_names)):
             # Keep all original fields when removing prefixes would erase a
             # distinct attribute. The shared scorer also recognizes prefixes.
-            issues.append({"line": line_number, "reason": "attribute_name_collision"})
+            issues.append({"line": line_number, "reason": "attribute_name_collision",
+                           "warning": True})
             normalized = attributes
         else:
             normalized = dict(zip(normalized_names, attributes.values()))
@@ -122,11 +131,9 @@ def convert_predictions(run_directory: Path, *, future_start_guard: bool = False
     examples = unique_rows(run_directory / "inputs/chunks.jsonl")
     raw_directory = run_directory / "raw"
     statistics = read_json(raw_directory / "client.json")
-    if statistics.get("num_early_stopped") or statistics.get("early_stopped_ids"):
-        raise ValueError(
-            "Inference stopped at the retried-chunk limit; saved raw prefixes are partial, "
-            "not full-recording scoring inputs"
-        )
+    # Recordings stopped at the retried-chunk limit export their decoded prefix
+    # and are marked partial.
+    early_stopped = set(statistics.get("early_stopped_ids", []))
     if statistics.get("num_errors") != 0 or statistics.get("error_ids"):
         raise ValueError(
             "Inference contains request errors; resume query before conversion"
@@ -166,11 +173,17 @@ def convert_predictions(run_directory: Path, *, future_start_guard: bool = False
         raise ValueError("Client truncation statistics have inconsistent key coverage")
     for key, example in examples.items():
         messages = results[key]
-        if not isinstance(messages, list) or len(messages) != len(example["chunks"]):
+        expected = len(example["chunks"])
+        if not isinstance(messages, list) or not (
+            len(messages) == expected or (key in early_stopped and len(messages) < expected)
+        ):
             raise ValueError(
                 f"{key}: assistant turn count differs from saved audio chunks"
             )
         events, issues, suspicious_turns = [], [], []
+        if len(messages) < expected:
+            issues.append({"reason": "early_stop", "decoded_chunks": len(messages),
+                           "total_chunks": expected})
         for turn_index, (message, chunk) in enumerate(zip(messages, example["chunks"])):
             parsed, turn_issues = parse_turn(
                 _assistant_text(message, key), chunk["start"]
@@ -193,9 +206,10 @@ def convert_predictions(run_directory: Path, *, future_start_guard: bool = False
         retained, duplicate_groups = deduplicate_events(events)
         predictions.append({**prediction, "events": retained})
         deduplication.append({"key": key, "original_events": len(events), "retained_events": len(retained), "groups": duplicate_groups})
-        status = "partial" if issues or key in truncated else "ok"
+        problems = [issue for issue in issues if not issue.get("warning")]
+        status = "partial" if problems or key in truncated else "ok"
         if not events and key not in truncated:
-            status = "parse_error" if issues else "empty"
+            status = "parse_error" if problems else "empty"
         diagnostics.append(
             {
                 "key": key,

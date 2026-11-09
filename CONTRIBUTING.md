@@ -10,7 +10,7 @@ Use Python 3.12. The CPU tests use synthetic fixtures and do not require model w
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --only-binary=:all: --require-hashes -r requirements/client.lock
-python -m pip install --no-deps .
+python -m pip install --no-deps -e .
 python -m pip install pytest==8.1.1 fastapi==0.136.3 python-multipart==0.0.32
 python -m pip check
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -B -m pytest -q

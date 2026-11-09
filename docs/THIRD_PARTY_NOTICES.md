@@ -10,4 +10,4 @@ LongCap's source is provided under Apache-2.0. Installed dependencies retain the
 | Qwen3.5 text backbone | https://huggingface.co/Qwen/Qwen3.5-35B-A3B-Base | Apache-2.0 |
 | Qwen3-Omni audio encoder | https://github.com/QwenLM/Qwen3-Omni | Apache-2.0 |
 
-Model weights are distributed separately with their own LICENSE, NOTICE and upstream license copies. Benchmark labels use their separately stated annotation license; source audio/video is not part of the release. NVIDIA CUDA libraries and official container base images retain their supplier terms; no CUDA license is replaced by the LongCap source license.
+Model weights are distributed separately with their own LICENSE, NOTICE and upstream license copies. The benchmark dataset is released under Apache-2.0 with its own LICENSE; source audio and video are not part of the release. NVIDIA CUDA libraries and official container base images retain their supplier terms; no CUDA license is replaced by the LongCap source license.

@@ -1,11 +1,11 @@
 # Reproducibility and known limitations
 
-LongCap reports historical checkpoint evaluations separately from software and container checks. The captioning and diarization scores in the model card are saved results for the released V4 weights. The checks below establish specific implementation behavior; they do not establish semantic completeness or bitwise GPU generation reproducibility.
+LongCap reports benchmark scores separately from software and container checks. The captioning and diarization scores in the README are saved results of the released FP8 checkpoint. The checks below establish specific implementation behavior; they do not establish semantic completeness or bitwise GPU generation reproducibility.
 
 | Check | Result |
 | --- | --- |
 | CPU test suite | 88 passed, 0 skipped; includes ASGI uploads, generation dispatch, server lifecycle, model identity, retries/resume, caption conversion, and native diarization task routing/export |
-| Saved V4 caption conversion parity | Exact agreement on 1,549 records: 1,500 Short, 4 full Long, and 45 Long-window records |
+| Saved caption conversion parity | Exact agreement on 1,549 records: 1,500 Short, 4 full Long, and 45 Long-window records |
 | Native diarization parser parity | Exact agreement with the original evaluator on 451 saved English/Chinese recordings, 9,789 turns, and 36,065 speech segments |
 | Copied model | All 21 shards independently rehashed after copying; safetensor headers, index keys, tensor offsets, and payload coverage verified; full checksums also passed on both GPU workers |
 | CPU package installation | Final wheel installed in a clean environment; CLI, dependency consistency, tokenizer round-trip, model identity, and stereo-audio preparation passed without installing or importing PyTorch/vLLM |
@@ -23,7 +23,7 @@ The actual-image GPU test used Python 3.12.3, PyTorch/torchaudio 2.11.0 with CUD
 
 The 16-second input produced no events (`empty`); the 96-second multi-chunk input produced one music event (`ok`). These exact predictions matched the preceding isolated-wheel smoke run. All test commands exited successfully and completed-record resume left its request journal unchanged. This establishes execution, export, and resume behavior, not semantic caption completeness. Interrupted-resume behavior is covered by CPU tests, not this GPU smoke. No registry release image has been qualified on all four full recordings.
 
-## Full-duration and historical comparisons
+## Full-recording run and saved scores
 
 The separate full-recording run used the same installed release Python source and core model-runtime versions, with an existing dependency environment and Python 3.12.13. Its transitive package versions differ from the freshly resolved container lock. These results are distinct from the actual-image smoke and do not establish exact container decode parity.
 
@@ -40,7 +40,7 @@ The run used 80 extra generation attempts across 39 retried chunks. Caption-form
 
 As documented in `docs/inference.md`, an early-stopped recording withholds the batch's complete-benchmark prediction export. The raw replies and `raw/client.json` exist; final prediction JSONL and conversion summaries were not produced. There are therefore no final converted event counts, conversion statuses, or new semantic scores for this run. No diagnostic conversion was substituted for that missing export. The default retry limit remains 20; this test does not qualify uninterrupted coverage of all four recordings under that default.
 
-The retained historical full-Long scores include partial/truncated output for three of four recordings. The windowed scores include two partial/truncated windows, and two Short clips have empty output. Default conversion parity establishes that the same saved raw responses produce the same published-format predictions. It does not establish bitwise GPU generation reproducibility or new benchmark scores. The current client also has an explicit operational retry-chunk limit, documented in `docs/inference.md`, that is separate from the historical scored decodes.
+The saved full-Long scores include partial/truncated output for three of four recordings. The windowed scores include two partial/truncated windows, and two Short clips have empty output. Default conversion parity establishes that the same saved raw responses produce the same published-format predictions. It does not establish bitwise GPU generation reproducibility or new benchmark scores. The current client also has an explicit operational retry-chunk limit, documented in `docs/inference.md`, that is separate from the saved scored decodes.
 
 ## BF16 checkpoint
 

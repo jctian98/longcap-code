@@ -5,11 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "longcap"
 version = "0.1.0"
-description = "LongCap 35B-A3B audio captioning and speech diarization client with a custom vLLM service"
+description = "LongCap: hour-scale timestamped audio captioning and speech diarization with a custom vLLM server"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "docs/THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.12,<3.13"
+authors = [{ name = "The LongCap authors" }]
+keywords = ["audio captioning", "timestamped audio captioning", "speaker diarization", "speech recognition", "long-form audio", "vllm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
   "numpy==2.3.5", "soundfile==0.14.0", "httpx==0.28.1",
   "transformers==5.14.1", "tokenizers==0.22.2",
@@ -23,6 +33,13 @@ server = [
   "python-multipart==0.0.32",
 ]
 test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://jctian98.github.io/longcap/"
+Repository = "https://github.com/jctian98/longcap-code"
+Documentation = "https://github.com/jctian98/longcap-code#quickstart"
+"Model (FP8)" = "https://huggingface.co/JinchuanTian/LongCap-35B-A3B-FP8"
+"Model (BF16)" = "https://huggingface.co/JinchuanTian/LongCap-35B-A3B"
 
 [project.scripts]
 longcap = "longcap.cli:main"

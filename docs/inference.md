@@ -2,8 +2,8 @@
 
 LongCap-35B-A3B supports timestamped audio captioning and speech diarization
 with speaker-attributed transcription. Both tasks use the same checkpoint and
-vLLM server. The released model is stage-2 V4 step 3000 before flywheel training;
-native event-ancestor prediction is unsupported.
+vLLM server. The released checkpoint is LongCap-SFT-2 at step 3000; it does not
+predict links between events.
 
 | Task | Command | Native prompt | Output |
 | --- | --- | --- | --- |
@@ -187,8 +187,8 @@ history; exhausted retries retain the final observed response. Generation uses
 greedy decoding and an 8129-token cap. The newer operational default stops a
 recording after 20 distinct chunks use retries, marking its prefix incomplete.
 Use `--max-retried-chunks 0` only when intentionally disabling that stop for a
-fresh run. This operational limit is distinct from the historical scored V4
-decodes; the historical results are not new measurements of this release.
+fresh run. This operational limit was not used in the decodes behind the
+reported scores; those scores are not new measurements of this release.
 
 For either task, exit status 0 means an export completed without detected
 partial/error status; it does not establish semantic correctness. Status 2 indicates partial/truncated
@@ -203,14 +203,14 @@ directory. Other recordings in the batch continue independently.
 ## Conversion and paper comparability
 
 Default conversion uses `speech_caption_insensitive_overlap_v2`, matching the
-saved V4 captioning results. It removes connected, positively overlapping duplicates;
+saved captioning results reported for the released checkpoint. It removes connected, positively overlapping duplicates;
 speech with a nonempty transcript may differ only in free-text `caption`.
 All other attributes must match. Non-speech and transcript-free events require
 complete attribute equality. It preserves the first event and its timestamps;
 disjoint and merely touching events remain separate. Warnings alone never
 authorize deletion.
 
-The release parser/deduplicator was replayed against all saved V4 outputs:
+The release parser/deduplicator was replayed against all saved outputs of the released checkpoint:
 1,500 Short records, four full Long recordings and 45 Long-10min windows, with
 exact agreement for every prediction record. This verifies conversion parity,
 not GPU decode parity. The retained full-Long scores include three recordings

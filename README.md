@@ -2,7 +2,7 @@
 
 **Jinchuan Tian, Sen Chen, Wenbin Huang, Chao Weng, Zhengwei Huang, Jiatong Shi, Yichen Lu, Haoran Wang, Shinji Watanabe, and Cong Zhou**
 
-[Project page](https://jctian98.github.io/longcap/) · [Paper and release assets](https://github.com/jctian98/longcap-code/releases) · [Model, FP8](https://huggingface.co/JinchuanTian/LongCap-35B-A3B-FP8) · [Model, BF16](https://huggingface.co/JinchuanTian/LongCap-35B-A3B) · [Long benchmark](https://huggingface.co/datasets/JinchuanTian/LongCap-Long)
+[Project page](https://jctian98.github.io/longcap/) · [Paper and release assets](https://github.com/jctian98/longcap-code/releases) · [Model, FP8](https://huggingface.co/JinchuanTian/LongCap-35B-A3B-FP8) · [Model, BF16](https://huggingface.co/JinchuanTian/LongCap-35B-A3B) · [Benchmark](https://huggingface.co/datasets/JinchuanTian/LongCapBench-TAC-Long)
 
 Official inference code for **LongCap**, a framework for describing audio events with timestamps across recordings from seconds to hours. LongCap interleaves audio chunks and structured text, retaining earlier context while expressing event times relative to each chunk.
 
@@ -27,7 +27,7 @@ Captioning results for the released checkpoint:
 
 Values are percentages from the saved evaluation, using `speech_caption_insensitive_overlap_v2` conversion. All examples are included, including partial/truncated outputs in three full recordings and two windows, and two empty short outputs. These are historical results of the FP8 checkpoint; they are not scores from a new container run. Speech recognition and diarization results for the same checkpoint are in the model repositories' `evaluation.json`.
 
-The [long benchmark](https://huggingface.co/datasets/JinchuanTian/LongCap-Long) contains four recordings with 6,520 reference events and the saved model predictions. It distributes source URLs and annotations. Audio and video are not bundled. See [reproducibility and limitations](VALIDATION.md) for inference checks and long-recording coverage.
+[LongCapBench-TAC-Long](https://huggingface.co/datasets/JinchuanTian/LongCapBench-TAC-Long), the long-form subset of our benchmark, contains four full recordings with 6,520 human-annotated events and the saved model predictions. It distributes source links and annotations; audio and video are not included. See [reproducibility and limitations](VALIDATION.md) for inference checks and long-recording coverage.
 
 ## Quickstart
 

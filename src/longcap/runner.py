@@ -45,7 +45,7 @@ def _retry_summary(records, field):
 
 def _run_inference(
     run: Path, model: Path, service: str, *, concurrency: int = 1,
-    max_tokens: int = 8129, timeout: float = 1800, max_retried_chunks: int = 20,
+    max_tokens: int = 8192, timeout: float = 1800, max_retried_chunks: int = 20,
     future_start_guard: bool = False, tokenizer=None, task: str = "caption",
 ) -> tuple[dict, int]:
     if concurrency < 1 or max_tokens < 1 or timeout <= 0 or max_retried_chunks < 0:
@@ -162,7 +162,7 @@ def _run_inference(
 
 def run_caption(
     run: Path, model: Path, service: str, *, concurrency: int = 1,
-    max_tokens: int = 8129, timeout: float = 1800, max_retried_chunks: int = 20,
+    max_tokens: int = 8192, timeout: float = 1800, max_retried_chunks: int = 20,
     future_start_guard: bool = False, tokenizer=None,
 ) -> tuple[dict, int]:
     return _run_inference(

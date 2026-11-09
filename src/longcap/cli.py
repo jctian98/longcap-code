@@ -45,7 +45,7 @@ def main(argv=None) -> int:
     verify = commands.add_parser("verify-model", help="Verify every published model checksum")
     verify.add_argument("--model", type=Path, required=True)
     for name, description, token_budget in (
-        ("caption", "Caption local audio with the upload client", 8129),
+        ("caption", "Caption local audio with the upload client", 8192),
         ("diarize", "Transcribe local audio with speaker labels and timestamps", 32768),
     ):
         command = commands.add_parser(name, help=description)

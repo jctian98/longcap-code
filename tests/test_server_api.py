@@ -42,7 +42,7 @@ def test_upload_generate_and_disabled_file_access(tmp_path):
             generated = await client.post("/generate", json={
                 "prompt_token_ids": [1, 5, 8, 0, 2, 6, 7],
                 "audio_segments": [{"audio_id": meta["audio_id"], "start_sample": 0, "end_sample": 16000}],
-                "sampling": {"max_tokens": 8129, "repetition_penalty": 1.05},
+                "sampling": {"max_tokens": 8192, "repetition_penalty": 1.05},
             })
             assert generated.status_code == 200
             assert generated.json() == {"token_ids": [300, 301], "terminator": 2, "finish_reason": "eos"}

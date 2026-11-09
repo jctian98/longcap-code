@@ -4,6 +4,7 @@ LongCap's source is provided under Apache-2.0. Installed dependencies retain the
 
 | Component | Upstream | License |
 | --- | --- | --- |
+| ESPnet (the `espnet2.speechlm` modules are derived from it) | https://github.com/espnet/espnet | Apache-2.0 |
 | vLLM | https://github.com/vllm-project/vllm | Apache-2.0 |
 | Transformers/tokenizers | https://github.com/huggingface/transformers and https://github.com/huggingface/tokenizers | Apache-2.0 |
 | PyTorch/torchaudio | https://github.com/pytorch/pytorch and https://github.com/pytorch/audio | BSD-style licenses; see installed distributions |

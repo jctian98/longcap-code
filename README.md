@@ -67,6 +67,10 @@ LongCap is a research release, intended for research use. It is not a product or
 }
 ```
 
+## Contact
+
+Jinchuan Tian and Shinji Watanabe, Carnegie Mellon University: [jinchuat@andrew.cmu.edu](mailto:jinchuat@andrew.cmu.edu), [swatanab@andrew.cmu.edu](mailto:swatanab@andrew.cmu.edu). For bugs and usage questions, please open a [GitHub issue](https://github.com/jctian98/longcap-code/issues).
+
 ## Acknowledgments and license
 
-We thank Xinying Hu, Shuangshuang He, and Zhuoqun Liu for their expert annotation work, and Anuttacon for its support of this work. The code, model weights, and benchmark are released under the [Apache License 2.0](LICENSE); see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+We thank Xinying Hu, Shuangshuang He, and Zhuoqun Liu for their expert annotation work, and Anuttacon for its support of this work. The inference code is built on [ESPnet](https://github.com/espnet/espnet) and [vLLM](https://github.com/vllm-project/vllm). The code, model weights, and benchmark are released under the [Apache License 2.0](LICENSE); see [third-party notices](docs/THIRD_PARTY_NOTICES.md).

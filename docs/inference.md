@@ -87,7 +87,7 @@ longcap diarize --audio /input/example.wav --key example \
   --service http://127.0.0.1:20000 --output /output/example-diarization
 ```
 
-Each task needs its own output directory. `caption` uses an 8,129-token output
+Each task needs its own output directory. `caption` uses an 8,192-token output
 budget per assistant segment with caption-format and repetition retries. `diarize` uses the
 native English/Chinese diarization evaluation policy: a 32,768-token budget per assistant segment and greedy
 decoding without those caption retries. Both accept `--max-tokens`; actual output
@@ -184,7 +184,7 @@ a fresh output directory.
 For captioning, format and mechanical repetition checks share four attempts per
 assistant segment, with penalties 1.0, 1.05, 1.10 and 1.15. Rejected replies never enter
 history; exhausted retries retain the final observed response. Generation uses
-greedy decoding and an 8129-token cap. The newer operational default stops a
+greedy decoding and an 8192-token cap. The newer operational default stops a
 recording after 20 distinct chunks use retries, marking its prefix incomplete.
 Use `--max-retried-chunks 0` only when intentionally disabling that stop for a
 fresh run. This operational limit was not used in the decodes behind the

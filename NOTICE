@@ -1,8 +1,11 @@
 LongCap
 Copyright 2026 the LongCap authors.
 
-This package adapts the LongCap SpeechLM/vLLM client, server and
-postprocessing implementation into a standalone distribution. It uses
-the upstream vLLM, PyTorch, Transformers and Qwen model implementations;
-their copyright notices and licenses remain applicable to those
-dependencies. See docs/THIRD_PARTY_NOTICES.md.
+This package includes code derived from ESPnet, the end-to-end speech
+processing toolkit (https://github.com/espnet/espnet), which is licensed
+under the Apache License, Version 2.0. The modules under
+src/espnet2/speechlm/ keep ESPnet's package layout.
+
+LongCap also uses vLLM, PyTorch, Transformers, and the Qwen model
+implementations; their copyright notices and licenses remain applicable
+to those dependencies. See docs/THIRD_PARTY_NOTICES.md.

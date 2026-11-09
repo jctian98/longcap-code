@@ -52,7 +52,7 @@ Uploaded chunks remain in the spool directory until you remove them after
 shutting down the server. There is no automatic retention policy or deletion
 endpoint; allocate disk space for the audio you process.
 
-The FP8 checkpoint runs on one H100 80GB with tensor parallel size 1. The BF16 checkpoint needs two GPUs; the [README quickstart](../README.md#quickstart) gives its server command.
+The FP8 checkpoint runs on one H100 80GB with tensor parallel size 1. The BF16 checkpoint needs two GPUs; the [quickstart](quickstart.md) gives its server command.
 The default profiles preserve the documented server settings:
 
 | Setting | Short | Long |

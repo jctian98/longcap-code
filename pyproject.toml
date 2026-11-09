@@ -37,7 +37,7 @@ test = ["pytest>=7"]
 [project.urls]
 Homepage = "https://jctian98.github.io/longcap/"
 Repository = "https://github.com/jctian98/longcap-code"
-Documentation = "https://github.com/jctian98/longcap-code#quickstart"
+Documentation = "https://github.com/jctian98/longcap-code/blob/main/docs/quickstart.md"
 "Model (FP8)" = "https://huggingface.co/JinchuanTian/LongCap-35B-A3B-FP8"
 "Model (BF16)" = "https://huggingface.co/JinchuanTian/LongCap-35B-A3B"
 

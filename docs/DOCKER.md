@@ -7,7 +7,7 @@ The LongCap image provides the vLLM server and both inference commands: audio ca
 - Linux x86-64, Docker, and NVIDIA Container Toolkit.
 - An NVIDIA driver compatible with CUDA 13.0. The prior H100 checks used driver 580.159.03.
 - One H100 80GB at tensor parallel size 1 for the FP8 checkpoint, which these examples use. Prior tests used an 8-CPU, 128-GB RAM host; minimum host memory was not measured.
-- The BF16 checkpoint, `JinchuanTian/LongCap-35B-A3B`, needs two H100 80GB GPUs; see the [README quickstart](../README.md#quickstart) for its two-GPU server command.
+- The BF16 checkpoint, `JinchuanTian/LongCap-35B-A3B`, needs two H100 80GB GPUs; see the [quickstart](quickstart.md) for its two-GPU server command.
 
 The base is the official PyTorch image `pytorch/pytorch:2.11.0-cuda13.0-cudnn9-devel`, pinned by digest in the [Dockerfile](../docker/Dockerfile). The environment uses Python 3.12, PyTorch/torchaudio 2.11.0, vLLM 0.26.0, and Transformers 5.14.1. The image contains hash-locked dependencies and the LongCap implementation; it does not include model weights, input audio, or credentials. See [validation and limitations](../VALIDATION.md) for the scope of GPU testing.
 

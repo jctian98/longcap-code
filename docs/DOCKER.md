@@ -6,14 +6,15 @@ The LongCap image provides the vLLM server and both inference commands: audio ca
 
 - Linux x86-64, Docker, and NVIDIA Container Toolkit.
 - An NVIDIA driver compatible with CUDA 13.0. The prior H100 checks used driver 580.159.03.
-- One H100 80GB at tensor parallel size 1 is the initial hardware target. Prior tests used an 8-CPU, 128-GB RAM host; minimum host memory was not measured.
+- One H100 80GB at tensor parallel size 1 for the FP8 checkpoint, which these examples use. Prior tests used an 8-CPU, 128-GB RAM host; minimum host memory was not measured.
+- The BF16 checkpoint, `JinchuanTian/LongCap-35B-A3B`, needs two H100 80GB GPUs; see the [README quickstart](../README.md#quickstart) for its two-GPU server command.
 
 The base is the official PyTorch image `pytorch/pytorch:2.11.0-cuda13.0-cudnn9-devel`, pinned by digest in the [Dockerfile](../docker/Dockerfile). The environment uses Python 3.12, PyTorch/torchaudio 2.11.0, vLLM 0.26.0, and Transformers 5.14.1. The image contains hash-locked dependencies and the LongCap implementation; it does not include model weights, input audio, or credentials. See [validation and limitations](../VALIDATION.md) for the scope of GPU testing.
 
 ## Download the model and image
 
 ```bash
-hf download JinchuanTian/LongCap-35B-A3B --local-dir ./models/LongCap-35B-A3B
+hf download JinchuanTian/LongCap-35B-A3B-FP8 --local-dir ./models/LongCap-35B-A3B-FP8
 docker pull ghcr.io/jctian98/longcap:0.1.0-rc.2
 ```
 
@@ -23,7 +24,7 @@ Verify the complete model directory:
 
 ```bash
 docker run --rm \
-  -v "$PWD/models/LongCap-35B-A3B:/models/longcap-35b-a3b:ro" \
+  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
   ghcr.io/jctian98/longcap:0.1.0-rc.2 \
   verify-model --model /models/longcap-35b-a3b
 ```
@@ -34,7 +35,7 @@ docker run --rm \
 mkdir -p cache
 docker run --rm --gpus '"device=0"' --shm-size=16g \
   -p 127.0.0.1:20000:20000 \
-  -v "$PWD/models/LongCap-35B-A3B:/models/longcap-35b-a3b:ro" \
+  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
   -v "$PWD/cache:/cache" \
   ghcr.io/jctian98/longcap:0.1.0-rc.2
 ```
@@ -55,7 +56,7 @@ Audio captioning:
 
 ```bash
 docker run --rm --network host \
-  -v "$PWD/models/LongCap-35B-A3B:/models/longcap-35b-a3b:ro" \
+  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
   -v "$PWD/inputs:/inputs:ro" \
   -v "$PWD/outputs:/output" \
   ghcr.io/jctian98/longcap:0.1.0-rc.2 \
@@ -68,7 +69,7 @@ Speech diarization and transcription:
 
 ```bash
 docker run --rm --network host \
-  -v "$PWD/models/LongCap-35B-A3B:/models/longcap-35b-a3b:ro" \
+  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
   -v "$PWD/inputs:/inputs:ro" \
   -v "$PWD/outputs:/output" \
   ghcr.io/jctian98/longcap:0.1.0-rc.2 \

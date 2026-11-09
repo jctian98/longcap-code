@@ -41,3 +41,19 @@ The run used 80 extra generation attempts across 39 retried chunks. Caption-form
 As documented in `docs/inference.md`, an early-stopped recording withholds the batch's complete-benchmark prediction export. The raw replies and `raw/client.json` exist; final prediction JSONL and conversion summaries were not produced. There are therefore no final converted event counts, conversion statuses, or new semantic scores for this run. No diagnostic conversion was substituted for that missing export. The default retry limit remains 20; this test does not qualify uninterrupted coverage of all four recordings under that default.
 
 The retained historical full-Long scores include partial/truncated output for three of four recordings. The windowed scores include two partial/truncated windows, and two Short clips have empty output. Default conversion parity establishes that the same saved raw responses produce the same published-format predictions. It does not establish bitwise GPU generation reproducibility or new benchmark scores. The current client also has an explicit operational retry-chunk limit, documented in `docs/inference.md`, that is separate from the historical scored decodes.
+
+## BF16 checkpoint
+
+Tested on 2026-11-08 with this release's source and dependency versions on two H100 80GB GPUs. `verify-model` passed for both checkpoints.
+
+| Configuration | Result |
+| --- | --- |
+| BF16, one H100 80GB | Does not start: the weights take 65.9 GiB, leaving 0.85 GiB of KV cache against 2.64 GiB needed for a 131,072-token context |
+| BF16, two H100 80GB, tensor parallel size 2 | Both profiles start (144 s for `long`, 159 s for `short`); every request completed |
+| FP8, one H100 80GB | Both profiles start; every request completed |
+
+With the same inputs and serving profile, BF16 and FP8 outputs on 30 LongCapBench-TAC-Short clips match closely: 95.5% to 98.1% of events pair one-to-one at temporal IoU of at least 0.5 (median IoU 1.0), and paired speech transcripts are 98% to 99% similar. Switching profiles at one precision changes the output by a similar amount (94.1% to 96.7% of events paired). Diarization transcripts of three recordings are 80% to 100% similar across precisions.
+
+Diarization of a 300-second awards-ceremony excerpt stopped after about 57 seconds with the `short` profile, for both precisions, while the `long` profile transcribed the whole excerpt. Use the `long` profile for diarization; the cause was not investigated.
+
+These checks ran the release source on PYTHONPATH inside the earlier validated image, not the published `0.1.0-rc.2` image. They compare outputs between precisions and are not new benchmark scores.

@@ -113,6 +113,10 @@ class AsyncSpeechLMEngine:
         # async_scheduling: overlap the CPU scheduler step with GPU execution.
         if async_scheduling is not None:
             extra["async_scheduling"] = async_scheduling
+        # vLLM fuses the tensor-parallel all-reduce with RMSNorm only when nvcc
+        # is on PATH, so two-GPU output would depend on whether a CUDA toolkit
+        # is installed. Keep it off so every installation runs the same kernels.
+        compilation_config = {"pass_config": {"fuse_allreduce_rms": False}}
         args = AsyncEngineArgs(
             model=model_dir,
             tokenizer=model_dir,
@@ -132,6 +136,7 @@ class AsyncSpeechLMEngine:
             mamba_ssm_cache_dtype=mamba_ssm_cache_dtype,
             enable_expert_parallel=enable_expert_parallel,
             moe_backend=moe_backend,
+            compilation_config=compilation_config,
             **extra,
         )
         # Machine-readable scheduler/cache stats (see stats_logger.py). The

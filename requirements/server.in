@@ -14,3 +14,8 @@ flashinfer-python==0.6.14
 triton==3.6.0
 python-multipart==0.0.32
 wheel==0.47.0
+# CUDA 13.0 compiler packages matching the runtime; `longcap serve` uses them as CUDA_HOME
+nvidia-cuda-nvcc==13.0.88
+nvidia-cuda-crt==13.0.88
+nvidia-nvvm==13.0.88
+nvidia-cuda-cccl==13.0.85

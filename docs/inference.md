@@ -1,6 +1,6 @@
 # Inference guide
 
-This guide covers the `longcap` commands in detail. For a first run, follow the [quickstart](quickstart.md).
+This guide covers the `longcap` commands in detail. For installation, in a Python environment or with Docker, and a first run, follow the [quickstart](quickstart.md).
 
 | Command | Purpose |
 | --- | --- |
@@ -44,6 +44,8 @@ longcap serve --model /models/longcap-35b-a3b --host 127.0.0.1 --port 20000 --wo
 Use `long` for diarization: with `short`, diarization of a five-minute recording stopped after about a minute in our checks. With `short`, pass `--concurrency` to the client to use the extra capacity. `--max-num-seqs` and `--max-audio-per-prompt` override the profile values.
 
 `--tensor-parallel-size 2` splits the model across two GPUs, which the BF16 checkpoint needs. The FP8 checkpoint runs on one H100 80GB. Tensor parallel size 8 is not supported.
+
+`longcap serve` runs the same GPU kernels in a Python environment and in the Docker image. Unless `CUDA_HOME` or `CUDA_PATH` is set, it uses the CUDA 13.0 compiler installed from `server.lock`; a toolkit you set yourself should be CUDA 13.0. It turns off two vLLM features that depend on whether a CUDA toolkit is installed: the FlashInfer top-k/top-p sampler (`VLLM_USE_FLASHINFER_SAMPLER=0`), which greedy decoding does not use, and the fusion of the tensor-parallel all-reduce with RMSNorm.
 
 The server keeps uploaded chunks under `--work-dir` until you delete them after shutdown; allocate disk space for the audio you process. It has no authentication and is meant for local or trusted use: keep it on `127.0.0.1`, or put an authenticated proxy in front of it. `--allow-audio-paths` lets clients register files by server-side path and should only be used on a trusted machine.
 

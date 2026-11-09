@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,27 @@ def serve_arguments(args) -> list[str]:
     if args.allow_audio_paths:
         options += ["--allow-audio-paths"]
     return options
+
+
+def serve_environment() -> None:
+    """Make a pip-installed server behave like the Docker image.
+
+    LongCap decodes greedily, so vLLM's FlashInfer top-k/top-p sampler never
+    affects its output; turning it off avoids compiling it with nvcc at startup.
+    Optional vLLM kernels such as DeepGEMM look for a CUDA toolkit when they are
+    imported; without CUDA_HOME or CUDA_PATH, point them at the CUDA 13.0
+    toolkit installed from server.lock. The Docker image sets its own CUDA_HOME.
+    """
+    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
+    if os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH"):
+        return
+    from importlib.util import find_spec
+    spec = find_spec("nvidia")
+    for base in (spec.submodule_search_locations or []) if spec else []:
+        candidate = Path(base) / "cu13"
+        if (candidate / "bin" / "nvcc").is_file():
+            os.environ["CUDA_HOME"] = str(candidate)
+            return
 
 
 class _HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
@@ -110,6 +132,7 @@ def main(argv=None) -> int:
     try:
         if args.command == "serve":
             args.work_dir.mkdir(parents=True, exist_ok=True)
+            serve_environment()
             from espnet2.speechlm.vllm.vllm_server.service import main as service_main
             return service_main(serve_arguments(args))
         if args.command == "verify-model":

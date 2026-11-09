@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "longcap"
-version = "0.1.0rc3"
+version = "0.1.0rc4"
 description = "LongCap: hour-scale timestamped audio captioning and speech diarization with a custom vLLM server"
 readme = "README.md"
 license = "Apache-2.0"

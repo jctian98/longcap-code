@@ -15,7 +15,7 @@ Paper (arXiv, coming soon) · <a href="https://jctian98.github.io/longcap/">Proj
 <img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-blue">
 </p>
 
-**LongCap** describes what happens in a recording, from a short clip to hours of audio, as a timeline of events. This repository contains its inference code: a vLLM server, a CPU client, and a Dockerfile; a prebuilt image is available.
+**LongCap** describes what happens in a recording, from a short clip to hours of audio, as a timeline of events. This repository contains its inference code: a vLLM server and a client that you install with pip, plus a Docker image as an alternative.
 
 ## What LongCap does
 
@@ -29,7 +29,7 @@ Attribute names and values are written in Chinese, while transcripts keep the sp
 
 ## How to use it
 
-LongCap runs as a GPU server in Docker and a CPU client. Follow the [Quickstart](docs/quickstart.md) to download a checkpoint and start the server, then run either task:
+LongCap runs as a GPU server and a client. Install both in a Python environment, or use the Docker image for the server; the [Quickstart](docs/quickstart.md) covers both. With the server running, use either task:
 
 ```bash
 # Timestamped audio captioning
@@ -41,7 +41,7 @@ longcap diarize --audio recording.wav \
   --model ./models/LongCap-35B-A3B-FP8 --output ./outputs/diarization
 ```
 
-Captioning writes timestamped events with their attributes to `outputs/caption/predictions/predictions.jsonl`; diarization writes timestamped segments with speaker labels and text to `outputs/diarization/predictions/diarization.jsonl`. The [inference guide](docs/inference.md) covers batches, resume, and output files, and [Docker](docs/DOCKER.md) covers container details.
+Captioning writes timestamped events with their attributes to `outputs/caption/predictions/predictions.jsonl`; diarization writes timestamped segments with speaker labels and text to `outputs/diarization/predictions/diarization.jsonl`. The [inference guide](docs/inference.md) covers batches, resume, and output files, and the [Docker guide](docs/DOCKER.md) covers running LongCap in a container.
 
 | Release | Description |
 | --- | --- |

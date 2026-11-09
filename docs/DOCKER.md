@@ -1,6 +1,6 @@
 # LongCap with Docker
 
-The image `ghcr.io/jctian98/longcap:0.1.0-rc.3` contains the LongCap server and the `longcap` command line. Model weights are downloaded separately and mounted read-only. The [quickstart](quickstart.md) shows the shortest path; this page covers the details.
+The image `ghcr.io/jctian98/longcap:0.1.0-rc.4` is an alternative to installing LongCap in your own Python environment. It contains the server and the `longcap` command line with the same pinned dependencies. Model weights are downloaded separately and mounted read-only. The [quickstart](quickstart.md) covers both ways; this page covers container details.
 
 ## Requirements
 
@@ -16,10 +16,10 @@ The image is built on the official PyTorch image `pytorch/pytorch:2.11.0-cuda13.
 mkdir -p cache
 docker run -d --name longcap --gpus '"device=0"' --shm-size=16g -p 127.0.0.1:20000:20000 \
   -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" -v "$PWD/cache:/cache" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.3
+  ghcr.io/jctian98/longcap:0.1.0-rc.4
 ```
 
-Without arguments, the image runs `longcap serve --model /models/longcap-35b-a3b --profile long --host 0.0.0.0 --port 20000 --work-dir /cache/service`. Arguments after the image name replace this whole command, so pass a complete `serve ...` command to change it. For the BF16 checkpoint on two GPUs, use `--gpus '"device=0,1"'` and `serve --model /models/longcap-35b-a3b --host 0.0.0.0 --port 20000 --work-dir /cache/service --tensor-parallel-size 2`, as in the [quickstart](quickstart.md#3-start-the-server).
+Without arguments, the image runs `longcap serve --model /models/longcap-35b-a3b --profile long --host 0.0.0.0 --port 20000 --work-dir /cache/service`. Arguments after the image name replace this whole command, so pass a complete `serve ...` command to change it. For the BF16 checkpoint on two GPUs, use `--gpus '"device=0,1"'` and `serve --model /models/longcap-35b-a3b --host 0.0.0.0 --port 20000 --work-dir /cache/service --tensor-parallel-size 2`, as in the [quickstart](quickstart.md#4-start-the-server).
 
 The `/cache` mount keeps uploaded audio chunks, server logs, and compiled kernels, so later starts are faster. Uploaded chunks stay there until you delete them. Files in `cache/` are owned by root because the container runs as root.
 
@@ -34,7 +34,7 @@ mkdir -p inputs outputs
 docker run --rm --network host \
   -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
   -v "$PWD/inputs:/inputs:ro" -v "$PWD/outputs:/output" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.3 \
+  ghcr.io/jctian98/longcap:0.1.0-rc.4 \
   caption --audio /inputs/recording.wav \
     --model /models/longcap-35b-a3b --output /output/caption
 ```

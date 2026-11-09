@@ -388,3 +388,24 @@ def test_manifest_without_duration_is_a_clear_error(tmp_path):
     write_jsonl(tmp_path / "manifest.jsonl", [{"key": "x", "audio_path": str(audio)}])
     with pytest.raises(ValueError, match="missing duration"):
         prepare_inputs(tmp_path / "manifest.jsonl", tmp_path / "run", workers=1)
+
+
+def test_serve_environment_matches_docker_defaults(tmp_path, monkeypatch):
+    import importlib.util
+    from longcap import cli
+    toolkit = tmp_path / "nvidia" / "cu13"
+    (toolkit / "bin").mkdir(parents=True)
+    (toolkit / "bin" / "nvcc").write_text("")
+    spec = importlib.util.spec_from_loader("nvidia", loader=None, is_package=True)
+    spec.submodule_search_locations = [str(tmp_path / "nvidia")]
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: spec if name == "nvidia" else None)
+    for name in ("CUDA_PATH", "CUDA_HOME", "VLLM_USE_FLASHINFER_SAMPLER"):
+        monkeypatch.delenv(name, raising=False)
+    cli.serve_environment()
+    assert os.environ["CUDA_HOME"] == str(toolkit)
+    assert os.environ["VLLM_USE_FLASHINFER_SAMPLER"] == "0"
+    monkeypatch.setenv("CUDA_HOME", "/opt/cuda")
+    monkeypatch.setenv("VLLM_USE_FLASHINFER_SAMPLER", "1")
+    cli.serve_environment()
+    assert os.environ["CUDA_HOME"] == "/opt/cuda"
+    assert os.environ["VLLM_USE_FLASHINFER_SAMPLER"] == "1"

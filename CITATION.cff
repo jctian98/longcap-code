@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: If you use LongCap, please cite the accompanying paper.
 type: software
 title: LongCap
-version: 0.1.0
+version: 0.1.0-rc.3
 license: Apache-2.0
 authors:
 - given-names: Jinchuan

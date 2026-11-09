@@ -16,7 +16,7 @@ python -m pip check
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 python -B -m pytest -q
 ```
 
-CI runs the CPU suite on pushes and pull requests. GPU checks and saved benchmark results are documented in [VALIDATION.md](VALIDATION.md).
+CI runs the CPU suite on pushes and pull requests. GPU checks and known limitations are documented in [VALIDATION.md](VALIDATION.md).
 
 ## Inference and evaluation changes
 

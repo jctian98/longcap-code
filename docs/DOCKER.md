@@ -19,7 +19,7 @@ docker run -d --name longcap --gpus '"device=0"' --shm-size=16g -p 127.0.0.1:200
   ghcr.io/jctian98/longcap:0.1.0-rc.3
 ```
 
-Without arguments, the image runs `longcap serve --model /models/longcap-35b-a3b --profile long --host 0.0.0.0 --port 20000 --work-dir /cache/service`. Pass your own `serve ...` arguments after the image name to change this; for the BF16 checkpoint on two GPUs, use `--gpus '"device=0,1"'` and add `--tensor-parallel-size 2`.
+Without arguments, the image runs `longcap serve --model /models/longcap-35b-a3b --profile long --host 0.0.0.0 --port 20000 --work-dir /cache/service`. Arguments after the image name replace this whole command, so pass a complete `serve ...` command to change it. For the BF16 checkpoint on two GPUs, use `--gpus '"device=0,1"'` and `serve --model /models/longcap-35b-a3b --host 0.0.0.0 --port 20000 --work-dir /cache/service --tensor-parallel-size 2`, as in the [quickstart](quickstart.md#3-start-the-server).
 
 The `/cache` mount keeps uploaded audio chunks, server logs, and compiled kernels, so later starts are faster. Uploaded chunks stay there until you delete them. Files in `cache/` are owned by root because the container runs as root.
 

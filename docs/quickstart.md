@@ -26,7 +26,7 @@ hf download JinchuanTian/$MODEL --local-dir ./models/$MODEL
 longcap verify-model --model ./models/$MODEL
 ```
 
-`verify-model` checks every file against the model's `SHA256SUMS`. Use `hf auth login` if repository access requires authentication.
+`verify-model` checks every runtime file listed in the model's `SHA256SUMS`. Use `hf auth login` if repository access requires authentication.
 
 ## 3. Start the server
 
@@ -39,7 +39,7 @@ docker run -d --name longcap --gpus '"device=0"' --shm-size=16g -p 127.0.0.1:200
   ghcr.io/jctian98/longcap:0.1.0-rc.3
 ```
 
-**BF16, two GPUs:** add the second GPU and split the model across both:
+**BF16, two GPUs:** add the second GPU and split the model across both (run this in the shell where you set `MODEL`):
 
 ```bash
 mkdir -p cache
@@ -92,5 +92,5 @@ Speaker labels distinguish voices within a recording; they do not identify real 
 - **Batches.** Use `--manifest` instead of `--audio` to process many recordings; see the [inference guide](inference.md#inputs).
 - **Exit status.** 0 means every recording finished. 2 means some output is incomplete; `predictions/conversion.jsonl` says which. 1 means a request failed or the server was unreachable.
 - **Resume.** Rerun the same command after an interruption or a server restart; finished work is kept. Use a new output directory for a different task, input, or model.
-- **Short clips.** For many short clips, the `short` profile serves more requests at once: start the server with the `serve ...` arguments shown for BF16, adding `--profile short` (and dropping `--tensor-parallel-size 2` for FP8), then pass `--concurrency` to the client. Keep the default `long` profile for diarization.
+- **Short clips.** For many short clips, the `short` profile serves more requests at once: start the server with the `serve ...` arguments shown for BF16, adding `--profile short` (for FP8, also use `--gpus '"device=0"'` and drop `--tensor-parallel-size 2`), then pass `--concurrency` to the client. Keep the default `long` profile for diarization.
 - **More.** See the [inference guide](inference.md) for all options and [Docker](DOCKER.md) to run the client in a container or build the image.

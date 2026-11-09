@@ -12,7 +12,7 @@ The exact commands you ran (server and client), with paths shortened if needed.
 
 **Environment**
 - Checkpoint: LongCap-35B-A3B-FP8 or LongCap-35B-A3B (BF16)
-- Docker image tag or `pip show longcap` version
+- Docker image tag, or the output of `longcap --version`
 - GPU model and count, NVIDIA driver version
 - Serving profile: `short` or `long`
 

@@ -178,7 +178,12 @@ def _build_app(engine: AsyncSpeechLMEngine, registry: AudioRegistry, config: dic
             if io_pool is not None:
                 io_pool.shutdown(wait=True, cancel_futures=True)
 
-    app = FastAPI(title="LongCap audio captioner", version="0.1.0", lifespan=lifespan)
+    from importlib.metadata import PackageNotFoundError, version as _package_version
+    try:
+        api_version = _package_version("longcap")
+    except PackageNotFoundError:
+        api_version = "unknown"
+    app = FastAPI(title="LongCap audio captioner", version=api_version, lifespan=lifespan)
 
     def _healthy() -> bool:
         check = getattr(engine, "is_healthy", None)
@@ -453,11 +458,8 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, default=20000)
     ap.add_argument("--spool-dir", default="service-work/audio-spool",
                     help="directory for uploaded audio chunks")
-    # Defaults below are the measured-best single-GPU serving config for the
-    # long-audio multi-hop job at 128-way concurrency (2026-08-27 study,
-    # espnet2/speechlm/vllm/THROUGHPUT.md): 218x realtime steady on 1x H100
-    # with the fp8-block 35B export. Every non-vLLM-default value was isolated
-    # experimentally; see the .md for the attribution table.
+    # Defaults below were tuned for long multi-chunk dialogues on one H100 with
+    # the FP8 checkpoint; `longcap serve` sets profile-specific values.
     ap.add_argument("--tensor-parallel-size", type=int, default=1)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.92,
                     help="0.85 wastes ~5.6 GB of KV pool on an 80 GB card "

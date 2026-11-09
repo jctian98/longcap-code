@@ -31,6 +31,7 @@ RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps . \
     && longcap caption --help \
     && longcap diarize --help \
     && python docker/check_environment.py \
+    && rm -rf build src/longcap.egg-info \
     && mkdir -p /cache /output
 # Uploaded audio, server logs, and compile caches live under the /cache mount.
 ENV VLLM_CACHE_ROOT=/cache/vllm \

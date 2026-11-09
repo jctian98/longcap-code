@@ -1,88 +1,47 @@
 # LongCap with Docker
 
-The LongCap image provides the vLLM server and both inference commands: audio captioning and speech diarization with transcription. Model weights are downloaded separately and mounted read-only.
+The image `ghcr.io/jctian98/longcap:0.1.0-rc.3` contains the LongCap server and the `longcap` command line. Model weights are downloaded separately and mounted read-only. The [quickstart](quickstart.md) shows the shortest path; this page covers the details.
 
 ## Requirements
 
-- Linux x86-64, Docker, and NVIDIA Container Toolkit.
-- An NVIDIA driver compatible with CUDA 13.0. The prior H100 checks used driver 580.159.03.
-- One H100 80GB at tensor parallel size 1 for the FP8 checkpoint, which these examples use. Prior tests used an 8-CPU, 128-GB RAM host; minimum host memory was not measured.
-- The BF16 checkpoint, `JinchuanTian/LongCap-35B-A3B`, needs two H100 80GB GPUs; see the [quickstart](quickstart.md) for its two-GPU server command.
+- Linux x86-64, Docker, and the NVIDIA Container Toolkit.
+- An NVIDIA driver compatible with CUDA 13.0.
+- One H100 80GB for the FP8 checkpoint, or two for the BF16 checkpoint.
 
-The base is the official PyTorch image `pytorch/pytorch:2.11.0-cuda13.0-cudnn9-devel`, pinned by digest in the [Dockerfile](../docker/Dockerfile). The environment uses Python 3.12, PyTorch/torchaudio 2.11.0, vLLM 0.26.0, and Transformers 5.14.1. The image contains hash-locked dependencies and the LongCap implementation; it does not include model weights, input audio, or credentials. See [validation and limitations](../VALIDATION.md) for the scope of GPU testing.
-
-## Download the model and image
-
-```bash
-hf download JinchuanTian/LongCap-35B-A3B-FP8 --local-dir ./models/LongCap-35B-A3B-FP8
-docker pull ghcr.io/jctian98/longcap:0.1.0-rc.2
-```
-
-Use `hf auth login` and `docker login ghcr.io` when repository/package access requires authentication. Immutable model revisions and image digests are listed in the [release manifest](https://github.com/jctian98/longcap-code/releases).
-
-Verify the complete model directory:
-
-```bash
-docker run --rm \
-  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.2 \
-  verify-model --model /models/longcap-35b-a3b
-```
+The image is built on the official PyTorch image `pytorch/pytorch:2.11.0-cuda13.0-cudnn9-devel`, pinned by digest in the [Dockerfile](../docker/Dockerfile), with Python 3.12, vLLM 0.26.0, and hash-locked dependencies. It contains no model weights, audio, or credentials.
 
 ## Start the server
 
 ```bash
 mkdir -p cache
-docker run --rm --gpus '"device=0"' --shm-size=16g \
-  -p 127.0.0.1:20000:20000 \
-  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
-  -v "$PWD/cache:/cache" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.2
+docker run -d --name longcap --gpus '"device=0"' --shm-size=16g -p 127.0.0.1:20000:20000 \
+  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" -v "$PWD/cache:/cache" \
+  ghcr.io/jctian98/longcap:0.1.0-rc.3
 ```
 
-Model loading and CUDA kernel compilation may take several minutes. Wait for `http://127.0.0.1:20000/health` to return success. The cache mount stores compiled kernels; inference needs no external model download.
+Without arguments, the image runs `longcap serve --model /models/longcap-35b-a3b --profile long --host 0.0.0.0 --port 20000 --work-dir /cache/service`. Pass your own `serve ...` arguments after the image name to change this; for the BF16 checkpoint on two GPUs, use `--gpus '"device=0,1"'` and add `--tensor-parallel-size 2`.
 
-The default service uses the long profile, with a configured 1M-token context. For shorter inputs, append `serve --model /models/longcap-35b-a3b --profile short --host 0.0.0.0 --port 20000`. Context size does not guarantee caption completeness or unlimited recording length. See [inference settings](inference.md).
+The `/cache` mount keeps uploaded audio chunks, server logs, and compiled kernels, so later starts are faster. Uploaded chunks stay there until you delete them. Files in `cache/` are owned by root because the container runs as root.
 
-## Run either task
+The server has no authentication. Publish its port only on `127.0.0.1`, as above, or put an authenticated proxy in front of it.
 
-The CPU client can run on the host as shown in the [README](../README.md), or in another container. Put an input recording at `inputs/example.wav` and create the output directory:
+## Run the client in a container
 
-```bash
-mkdir -p outputs
-```
-
-Audio captioning:
+The client can also run from the image instead of a local install. Put recordings in `inputs/`:
 
 ```bash
+mkdir -p inputs outputs
 docker run --rm --network host \
   -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
-  -v "$PWD/inputs:/inputs:ro" \
-  -v "$PWD/outputs:/output" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.2 \
-  caption --audio /inputs/example.wav --key example \
-    --model /models/longcap-35b-a3b \
-    --service http://127.0.0.1:20000 --output /output/caption
+  -v "$PWD/inputs:/inputs:ro" -v "$PWD/outputs:/output" \
+  ghcr.io/jctian98/longcap:0.1.0-rc.3 \
+  caption --audio /inputs/recording.wav \
+    --model /models/longcap-35b-a3b --output /output/caption
 ```
 
-Speech diarization and transcription:
+Replace `caption` with `diarize` for speech recognition with speaker diarization. `--network host` lets the container reach the server on `127.0.0.1` and works on Linux. The client uploads audio to the server, so the server needs no access to `inputs/`.
 
-```bash
-docker run --rm --network host \
-  -v "$PWD/models/LongCap-35B-A3B-FP8:/models/longcap-35b-a3b:ro" \
-  -v "$PWD/inputs:/inputs:ro" \
-  -v "$PWD/outputs:/output" \
-  ghcr.io/jctian98/longcap:0.1.0-rc.2 \
-  diarize --audio /inputs/example.wav --key example \
-    --model /models/longcap-35b-a3b \
-    --service http://127.0.0.1:20000 --output /output/diarization
-```
-
-Both clients use the same server. `--network host` is for Linux. The client uploads audio chunks, so the server does not need access to the input mount. Use separate output directories for different tasks and inspect each run's `raw/client.json` for coverage and errors. The [inference guide](inference.md) describes outputs and resume behavior.
-
-The service is intended for local or trusted deployment. Remote deployments need an authenticated gateway. Uploaded chunks remain in the server's work directory until removed after shutdown.
-
-## Build from source
+## Build the image
 
 From the repository root:
 
@@ -90,4 +49,4 @@ From the repository root:
 docker build -f docker/Dockerfile -t longcap:local .
 ```
 
-Use `longcap:local` in place of the registry image in the examples. The build installs dependencies from `requirements/bootstrap.lock` and `requirements/server.lock` into an isolated environment. Building the CUDA development image needs substantial temporary disk space; the repository's optional container workflow checks for at least 80 GiB on its runner.
+Use `longcap:local` in place of the published image. The build needs about 80 GB of free disk space.
